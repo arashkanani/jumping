@@ -107,6 +107,23 @@ body {
   color: #e56700;
 }
 
+.pads-status {
+  font-weight: 800;
+}
+
+.pads-status[data-status="connected"] {
+  color: #1a7a3a;
+}
+
+.pads-status[data-status="connecting"] {
+  color: #c47a00;
+}
+
+.pads-status[data-status="disconnected"],
+.pads-status[data-status="error"] {
+  color: #b03030;
+}
+
 .upgrade-toast {
   position: fixed;
   top: 22%;

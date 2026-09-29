@@ -3,11 +3,12 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { createArena } from "./arena.js";
+import { createArena, COLUMN_TOP_Y, PAD_X } from "./arena.js";
 import { createJumpling } from "./jumpling.js";
 import { ParticleBurst } from "./particles.js";
 import { createMetalRope } from "./rope.js";
 import { createSkyWorld } from "./sky.js";
+import { createFootPadClient } from "./footpads.js";
 
 const canvas = document.getElementById("game");
 const hint = document.getElementById("hint");
@@ -26,12 +27,14 @@ const JUMP_MIN = 8.5;
 const JUMP_MAX = 15.5;
 const CHARGE_MS = 380;
 const GRAVITY = -28;
-const PLATFORM_Y = 0.35;
+const PLATFORM_Y = COLUMN_TOP_Y + 0.12;
 const MAX_LIVES = 3;
+const FALL_GRAVITY = -38;
 
 const state = {
   clock: new THREE.Clock(),
   keys: { a: false, l: false },
+  padHold: { a: 0, l: 0 },
   started: false,
   running: false,
   gameOver: false,
@@ -48,28 +51,28 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1.08;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0xb8dff5, 28, 70);
+scene.fog = new THREE.Fog(0x7eb8e8, 35, 90);
 
 const camera = new THREE.PerspectiveCamera(
   42,
   window.innerWidth / window.innerHeight,
   0.1,
-  200
+  220
 );
-camera.position.set(0, 6.2, 14.5);
-camera.lookAt(0, 1.6, 0);
+camera.position.set(0, COLUMN_TOP_Y + 5.8, 17);
+camera.lookAt(0, COLUMN_TOP_Y + 0.4, 0);
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.22,
-  0.4,
-  0.88
+  0.38,
+  0.45,
+  0.8
 );
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
@@ -123,7 +126,7 @@ const bunnyBlue = createJumpling({
   shoeColor: 0x2f7bff,
   number: "7",
   eyeColor: 0x2a5fd4,
-  position: new THREE.Vector3(-4.15, PLATFORM_Y, 0.2),
+  position: new THREE.Vector3(-PAD_X, PLATFORM_Y, 0.15),
 });
 const bunnyOrange = createJumpling({
   name: "Bunny Dash",
@@ -134,7 +137,7 @@ const bunnyOrange = createJumpling({
   shoeColor: 0xff7a1a,
   number: "3",
   eyeColor: 0x3d7a40,
-  position: new THREE.Vector3(4.15, PLATFORM_Y, 0.2),
+  position: new THREE.Vector3(PAD_X, PLATFORM_Y, 0.15),
 });
 
 scene.add(bunnyBlue.group, bunnyOrange.group);
@@ -168,6 +171,8 @@ function makePlayer(jumpling, key, cardClass) {
     squash: 1,
     chargeStart: 0,
     alive: true,
+    falling: false,
+    fallDone: false,
     hitFlash: 0,
     spawn: jumpling.group.position.clone(),
   };
@@ -189,15 +194,15 @@ function createLights(scene) {
 
   // Warm sun from upper-left (like the reference photo)
   const sun = new THREE.DirectionalLight(0xfff3d6, 1.55);
-  sun.position.set(-10, 18, 8);
+  sun.position.set(-12, COLUMN_TOP_Y + 16, 10);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.near = 1;
-  sun.shadow.camera.far = 50;
-  sun.shadow.camera.left = -18;
-  sun.shadow.camera.right = 18;
-  sun.shadow.camera.top = 18;
-  sun.shadow.camera.bottom = -18;
+  sun.shadow.camera.far = 70;
+  sun.shadow.camera.left = -22;
+  sun.shadow.camera.right = 22;
+  sun.shadow.camera.top = 22;
+  sun.shadow.camera.bottom = -22;
   sun.shadow.bias = -0.00025;
   scene.add(sun);
 
@@ -205,8 +210,8 @@ function createLights(scene) {
   fill.position.set(8, 6, -6);
   scene.add(fill);
 
-  const bounce = new THREE.PointLight(0xffe0a0, 1.2, 30, 2);
-  bounce.position.set(0, 4, 4);
+  const bounce = new THREE.PointLight(0xffe0a0, 1.4, 35, 2);
+  bounce.position.set(0, COLUMN_TOP_Y + 2, 4);
   scene.add(bounce);
 }
 
@@ -230,14 +235,31 @@ function onKeyDown(e) {
   const k = e.key.toLowerCase();
   if (k !== "a" && k !== "l") return;
   if (e.repeat) return;
+  pressPlayer(k);
+}
 
+function onKeyUp(e) {
+  const k = e.key.toLowerCase();
+  if (k !== "a" && k !== "l") return;
+  releasePlayer(k);
+}
+
+function pressPlayer(k) {
   const p = players[k];
-  if (!p.alive || state.gameOver) return;
+  if (!p || !p.alive || p.falling || state.gameOver) return;
 
   if (!state.started) {
     state.started = true;
     state.running = true;
     hint.classList.add("hidden");
+  }
+
+  state.padHold[k] = (state.padHold[k] || 0) + 1;
+  if (state.padHold[k] > 1) {
+    // second foot already charging — keep held
+    state.keys[k] = true;
+    p.badge.classList.add("pressed");
+    return;
   }
 
   state.keys[k] = true;
@@ -249,20 +271,45 @@ function onKeyDown(e) {
   }
 }
 
-function onKeyUp(e) {
-  const k = e.key.toLowerCase();
-  if (k !== "a" && k !== "l") return;
+function releasePlayer(k) {
+  const p = players[k];
+  if (!p) return;
+
+  state.padHold[k] = Math.max(0, (state.padHold[k] || 0) - 1);
+  if (state.padHold[k] > 0) {
+    // other foot still down
+    return;
+  }
 
   state.keys[k] = false;
-  const p = players[k];
   p.badge.classList.remove("pressed");
 
-  if (!p.alive || state.gameOver || !p.grounded) return;
+  if (!p.alive || p.falling || state.gameOver || !p.grounded) return;
 
   const held = Math.min(1, (performance.now() - p.chargeStart) / CHARGE_MS);
   const power = JUMP_MIN + (JUMP_MAX - JUMP_MIN) * (0.35 + 0.65 * held);
   jump(p, power);
 }
+
+// Foot pads via ESP32 WebSocket (pads 0/1 → A, pads 2/3 → L)
+const padsStatusEl = document.getElementById("pads-status");
+createFootPadClient({
+  onDown: (key) => pressPlayer(key),
+  onUp: (key) => releasePlayer(key),
+  onStatus: ({ status, detail }) => {
+    if (!padsStatusEl) return;
+    padsStatusEl.dataset.status = status;
+    const labels = {
+      connecting: "Pads connecting…",
+      connected: "Pads online",
+      disconnected: "Pads offline",
+      error: "Pads error",
+    };
+    padsStatusEl.textContent = detail && status === "connected"
+      ? `Pads online · ${detail}`
+      : labels[status] || status;
+  },
+});
 
 function jump(p, power) {
   p.grounded = false;
@@ -279,6 +326,8 @@ function jump(p, power) {
 }
 
 function hitPlayer(p) {
+  if (p.falling || !p.alive) return;
+
   p.lives -= 1;
   refreshLives(p);
   p.hitFlash = 1;
@@ -290,25 +339,25 @@ function hitPlayer(p) {
   const pos = p.jumpling.group.position;
   particles.burst(pos.x, pos.y + 0.6, pos.z, new THREE.Color(0xff3355));
 
-  // Knock upward slightly so they don't instantly re-hit
+  if (p.lives <= 0) {
+    // Knocked off the column — dramatic fall
+    p.alive = false;
+    p.falling = true;
+    p.fallDone = false;
+    p.grounded = false;
+    p.vy = 3 + Math.random() * 2;
+    p.card.classList.add("out");
+    arena.burstDebris(pos.x, PLATFORM_Y, pos.z);
+    particles.burst(pos.x, PLATFORM_Y, pos.z, new THREE.Color(0xffaa44));
+    return;
+  }
+
+  // Still alive — knock up so they don't instantly re-hit
   if (p.grounded) {
     p.grounded = false;
     p.vy = 6;
   } else {
     p.vy = Math.max(p.vy, 5);
-  }
-
-  if (p.lives <= 0) {
-    p.alive = false;
-    p.card.classList.add("out");
-    p.jumpling.group.visible = false;
-  }
-
-  const aliveCount = Object.values(players).filter((pl) => pl.alive).length;
-  if (aliveCount === 0) {
-    endRound("Both out!");
-  } else if (!p.alive) {
-    // one player eliminated — keep going until both out or optional end
   }
 }
 
@@ -317,7 +366,7 @@ function endRound(title) {
   state.running = false;
   overlay.classList.remove("hidden");
   overlayTitle.textContent = title;
-  overlayMsg.textContent = `You survived ${state.surviveTime.toFixed(1)}s against the metal rope.`;
+  overlayMsg.textContent = `You survived ${state.surviveTime.toFixed(1)}s on the columns.`;
 }
 
 function resetRound() {
@@ -338,12 +387,15 @@ function resetRound() {
     p.lives = MAX_LIVES;
     p.jumps = 0;
     p.alive = true;
+    p.falling = false;
+    p.fallDone = false;
     p.grounded = true;
     p.vy = 0;
     p.squash = 1;
     p.peak = 0;
     p.hitFlash = 0;
     p.jumpling.group.visible = true;
+    p.jumpling.group.rotation.set(0, 0, 0);
     p.jumpling.group.position.copy(p.spawn);
     p.jumpling.group.position.y = PLATFORM_Y;
     p.jumpsEl.textContent = "0";
@@ -353,9 +405,31 @@ function resetRound() {
 }
 
 function updatePlayer(p, dt, time) {
-  if (!p.alive) return;
-
   const g = p.jumpling.group;
+
+  // Falling off the column after losing
+  if (p.falling) {
+    p.vy += FALL_GRAVITY * dt;
+    g.position.y += p.vy * dt;
+    g.position.x += Math.sign(g.position.x || 1) * 1.8 * dt;
+    g.rotation.z += dt * 3.5 * Math.sign(g.position.x || 1);
+    g.rotation.x += dt * 2.2;
+    p.squash = 1.15;
+
+    if (g.position.y < -6 && !p.fallDone) {
+      p.fallDone = true;
+      g.visible = false;
+      particles.burst(g.position.x, -5, g.position.z, new THREE.Color(0x88aacc));
+      if (Object.values(players).every((pl) => !pl.alive && pl.fallDone)) {
+        endRound("Both fell!");
+      }
+    }
+
+    p.jumpling.update(dt, time, { grounded: false, squash: p.squash, vy: p.vy });
+    return;
+  }
+
+  if (!p.alive) return;
 
   if (!p.grounded) {
     p.vy += GRAVITY * dt;
@@ -421,12 +495,16 @@ function animate() {
     }
   }
 
-  // Gentle camera breathe + slight punch on upgrades
-  const punch = arenaUpgradePulse * 0.35;
-  camera.position.x = Math.sin(time * 0.25) * 0.35;
-  camera.position.y = 6.2 + Math.sin(time * 0.4) * 0.12 + punch;
-  camera.position.z = 14.5 - punch * 1.5;
-  camera.lookAt(0, 1.8 + Math.max(players.a.peak, players.l.peak) * 0.15, 0);
+  // Camera framed on elevated columns
+  const punch = arenaUpgradePulse * 0.4;
+  camera.position.x = Math.sin(time * 0.25) * 0.4;
+  camera.position.y = COLUMN_TOP_Y + 5.8 + Math.sin(time * 0.4) * 0.15 + punch;
+  camera.position.z = 17 - punch * 1.5;
+  camera.lookAt(
+    0,
+    COLUMN_TOP_Y + 0.5 + Math.max(players.a.peak, players.l.peak) * 0.12,
+    0
+  );
 
   composer.render();
 }

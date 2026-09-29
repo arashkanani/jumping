@@ -1,9 +1,10 @@
 import * as THREE from "three";
+import { COLUMN_TOP_Y } from "./arena.js";
 
-const ROPE_LENGTH = 5.35;
+const ROPE_LENGTH = 5.5;
 const BASE_RADIUS = 0.055;
-export const ROPE_HEIGHT = 0.78;
-export const BASE_CLEAR_Y = 0.95;
+export const ROPE_HEIGHT = COLUMN_TOP_Y + 0.42;
+export const BASE_CLEAR_Y = COLUMN_TOP_Y + 0.62;
 const BASE_HIT_ANGLE = 0.22;
 const HIT_COOLDOWN = 1.1;
 const CIRCLES_PER_UPGRADE = 5;
@@ -258,7 +259,7 @@ export function createMetalRope(scene) {
     })
   );
   danger.rotation.x = -Math.PI / 2;
-  danger.position.set(ROPE_LENGTH / 2, -ROPE_HEIGHT + 0.39, 0);
+  danger.position.set(ROPE_LENGTH / 2, -0.45, 0);
   pivot.add(danger);
 
   const tipLight = new THREE.PointLight(0xff4466, 1.6, 6, 2);

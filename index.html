@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Park Jump Arena</title>
+    <title>GAME BOX</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -17,9 +17,8 @@
       <header class="top-bar">
         <div class="brand">
           <span class="brand-mark">◆</span>
-          <h1>Park Jump Arena</h1>
+          <h1>GAME BOX</h1>
         </div>
-        <p class="tagline">Sunny meadow showdown — jump so the rope never touches you</p>
         <div class="survive-bar">
           <span>Survived <strong id="survive-time">0.0</strong>s</span>
           <span class="sep">·</span>
@@ -30,6 +29,8 @@
           <span>Tier <strong id="stick-tier">Plain</strong></span>
           <span class="sep">·</span>
           <span>Speed <strong id="rope-speed">1.0</strong>x</span>
+          <span class="sep">·</span>
+          <span id="pads-status" class="pads-status" data-status="disconnected">Pads offline</span>
         </div>
       </header>
 
@@ -57,7 +58,7 @@
       </div>
 
       <div class="hint" id="hint">
-        Jump over the spinning stick with <kbd>A</kbd> / <kbd>L</kbd> — every 5 circles it gets nastier!
+        Jump with <kbd>A</kbd> / <kbd>L</kbd> or foot pads · Space to retry
       </div>
 
       <div class="overlay hidden" id="overlay">
