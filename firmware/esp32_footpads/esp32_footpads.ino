@@ -1,14 +1,12 @@
 /*
- * GAME BOX — ESP32 foot pads → cloud app (Render)
+ * GAME BOX — ESP32 foot pads → cloud (low latency)
  *
  * Flow:
- *   Foot switch → ESP32 → HTTPS POST → https://YOUR-APP.onrender.com/api/pad
- *                                    → browsers receive events on /ws
+ *   GPIO → ESP32 ──WSS──► wss://YOUR-APP.onrender.com/ws
+ *                              └─► all browsers (instant relay)
  *
- * You do NOT configure local IP or WebSocket SoftAP.
- * Just set GAME_URL to your deployed Render link.
- *
- * Libraries: none extra (WiFi + HTTPClient + WiFiClientSecure built-in)
+ * Uses a persistent WebSocket (not HTTPS POST per stomp) so jumps feel snappy.
+ * Library: WebSockets by Markus Sattler (Library Manager)
  *
  * Wiring (pressed = LOW, internal pull-up):
  *   Pad 0 (A / Cyan)   → GPIO 32 → GND
@@ -18,60 +16,73 @@
  */
 
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
-#include <HTTPClient.h>
+#include <WebSocketsClient.h>
 
 // ——— 1) Home WiFi (2.4 GHz only) ———
 const char *WIFI_SSID = "YOUR_WIFI_SSID";
 const char *WIFI_PASS = "YOUR_WIFI_PASSWORD";
 
-// ——— 2) Deployed game URL (no trailing slash) ———
-const char *GAME_URL = "https://jumping.onrender.com";
+// ——— 2) Render host (no https://, no path) ———
+const char *GAME_HOST = "jumping.onrender.com";
+const uint16_t GAME_PORT = 443;
+const char *GAME_WS_PATH = "/ws";
 
 const uint8_t PAD_PINS[4] = {32, 33, 25, 26};
 const uint8_t PAD_COUNT = 4;
-const uint16_t DEBOUNCE_MS = 25;
-const uint16_t HTTP_TIMEOUT_MS = 4000;
+const uint16_t DEBOUNCE_MS = 15;
 
 bool lastStable[PAD_COUNT];
 bool lastRaw[PAD_COUNT];
 unsigned long lastChangeMs[PAD_COUNT];
 
-WiFiClientSecure secureClient;
+WebSocketsClient webSocket;
+bool wsReady = false;
 
-bool postJson(const char *path, const String &body) {
-  if (WiFi.status() != WL_CONNECTED) return false;
-
-  HTTPClient http;
-  String url = String(GAME_URL) + path;
-  http.setTimeout(HTTP_TIMEOUT_MS);
-  http.setReuse(true);
-
-  if (!http.begin(secureClient, url)) {
-    Serial.println("[http] begin failed");
-    return false;
+void sendTxt(const String &msg) {
+  Serial.println(msg); // local log is immediate
+  if (wsReady && webSocket.isConnected()) {
+    webSocket.sendTXT(msg);
+  } else {
+    Serial.println("[ws] not connected — event queued only on Serial");
   }
-
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("Connection", "close");
-  int code = http.POST(body);
-  String resp = http.getString();
-  http.end();
-
-  Serial.printf("[http] POST %s → %d %s\n", path, code, resp.c_str());
-  return code >= 200 && code < 300;
 }
 
 void sendPad(uint8_t pad, bool down) {
   String body = String("{\"t\":\"") + (down ? "down" : "up") +
                 "\",\"pad\":" + String(pad) + "}";
-  Serial.println(body);
-  postJson("/api/pad", body);
+  sendTxt(body);
 }
 
 void sendLog(const String &msg) {
-  String body = String("{\"msg\":\"") + msg + "\"}";
-  postJson("/api/log", body);
+  String body = String("{\"t\":\"log\",\"msg\":\"") + msg + "\"}";
+  sendTxt(body);
+}
+
+void onWsEvent(WStype_t type, uint8_t *payload, size_t length) {
+  switch (type) {
+    case WStype_CONNECTED:
+      wsReady = true;
+      Serial.println("[ws] connected to cloud");
+      sendLog("esp32-online");
+      // Resync any pads currently held down
+      for (uint8_t i = 0; i < PAD_COUNT; i++) {
+        if (lastStable[i] == LOW) sendPad(i, true);
+      }
+      break;
+    case WStype_DISCONNECTED:
+      wsReady = false;
+      Serial.println("[ws] disconnected — will retry");
+      break;
+    case WStype_TEXT:
+      Serial.printf("[ws] RX: %s\n", payload);
+      break;
+    case WStype_ERROR:
+      wsReady = false;
+      Serial.println("[ws] error");
+      break;
+    default:
+      break;
+  }
 }
 
 bool connectWifi() {
@@ -82,7 +93,7 @@ bool connectWifi() {
 
   unsigned long start = millis();
   while (WiFi.status() != WL_CONNECTED) {
-    delay(400);
+    delay(300);
     Serial.print(".");
     if (millis() - start > 25000) {
       Serial.println("\nWiFi FAILED. Check SSID/pass (2.4 GHz).");
@@ -96,9 +107,9 @@ bool connectWifi() {
 
 void setup() {
   Serial.begin(115200);
-  delay(300);
-  Serial.println("\n=== GAME BOX Foot Pads → Cloud ===");
-  Serial.printf("GAME_URL  %s\n", GAME_URL);
+  delay(200);
+  Serial.println("\n=== GAME BOX Pads → Cloud WSS ===");
+  Serial.printf("Host  wss://%s%s\n", GAME_HOST, GAME_WS_PATH);
 
   for (uint8_t i = 0; i < PAD_COUNT; i++) {
     pinMode(PAD_PINS[i], INPUT_PULLUP);
@@ -108,25 +119,30 @@ void setup() {
     lastChangeMs[i] = millis();
   }
 
-  // Render uses a public CA cert; skip verify for hobby reliability
-  secureClient.setInsecure();
-
   if (!connectWifi()) {
     Serial.println("Stop — fix WiFi and reset.");
     return;
   }
 
-  sendLog("esp32-boot");
-  Serial.println("Ready — open the Render game; stomp pads to jump.");
+  // Persistent low-latency link (beginSSL uses setInsecure when no CA set)
+  webSocket.beginSSL(GAME_HOST, GAME_PORT, GAME_WS_PATH);
+  webSocket.onEvent(onWsEvent);
+  webSocket.setReconnectInterval(2000);
+  webSocket.enableHeartbeat(15000, 3000, 2);
+
+  Serial.println("Ready — open the Render game; stomp pads.");
 }
 
 void loop() {
   if (WiFi.status() != WL_CONNECTED) {
+    wsReady = false;
     Serial.println("WiFi lost — reconnecting…");
     WiFi.reconnect();
-    delay(1500);
+    delay(1000);
     return;
   }
+
+  webSocket.loop(); // keep WSS alive / flush sends
 
   unsigned long now = millis();
   for (uint8_t i = 0; i < PAD_COUNT; i++) {
@@ -139,7 +155,7 @@ void loop() {
 
     if ((now - lastChangeMs[i]) >= DEBOUNCE_MS && raw != lastStable[i]) {
       lastStable[i] = raw;
-      sendPad(i, raw == LOW); // LOW = pressed
+      sendPad(i, raw == LOW); // LOW = pressed — non-blocking over WSS
     }
   }
 }

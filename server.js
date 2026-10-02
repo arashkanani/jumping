@@ -1,9 +1,13 @@
 /**
  * GAME BOX — production server
  *
- * Serves the Vite build and relays ESP32 pad events to browsers:
- *   ESP32  POST https://your-app.onrender.com/api/pad  →  browsers on /ws
- *   ESP32  POST https://your-app.onrender.com/api/log  →  server + browser logs
+ * Serves the Vite build and relays pad events to browsers.
+ *
+ * Preferred (low latency):
+ *   ESP32 ──WSS──► /ws ──broadcast──► browsers
+ *
+ * Fallback:
+ *   ESP32  POST /api/pad  →  browsers on /ws
  */
 import express from "express";
 import { createServer } from "http";
@@ -21,11 +25,12 @@ app.set("trust proxy", 1);
 app.use(express.json({ limit: "32kb" }));
 
 /** @type {Set<import('ws').WebSocket>} */
-const browsers = new Set();
+const clients = new Set();
 
-function broadcast(obj) {
+function broadcast(obj, except = null) {
   const msg = typeof obj === "string" ? obj : JSON.stringify(obj);
-  for (const ws of browsers) {
+  for (const ws of clients) {
+    if (ws === except) continue;
     if (ws.readyState === 1) {
       try {
         ws.send(msg);
@@ -45,36 +50,61 @@ function normalizePad(body) {
   return { t, pad };
 }
 
+function handleIncoming(raw, fromWs = null) {
+  let data = raw;
+  if (typeof raw === "string") {
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      return false;
+    }
+  }
+  if (!data || typeof data !== "object") return false;
+
+  const event = normalizePad(data);
+  if (event) {
+    broadcast(event, null);
+    console.log(`[pad] ${event.t} pad=${event.pad} clients=${clients.size}`);
+    return true;
+  }
+
+  if (data.t === "log") {
+    console.log("[esp32-log]", data);
+    broadcast({ t: "log", ...data }, fromWs);
+    return true;
+  }
+
+  if (data.t === "hello") {
+    return true;
+  }
+
+  return false;
+}
+
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
     service: "game-box",
-    browsers: browsers.size,
+    clients: clients.size,
     uptime: Math.round(process.uptime()),
   });
 });
 
-/** ESP32 → cloud: pad press/release */
+/** HTTP fallback if WSS client is unavailable */
 app.post("/api/pad", (req, res) => {
-  const event = normalizePad(req.body);
-  if (!event) {
+  if (!handleIncoming(req.body)) {
     res.status(400).json({ ok: false, error: "expected { t:'down'|'up', pad:0..3 }" });
     return;
   }
-  broadcast(event);
-  console.log(`[pad] ${event.t} pad=${event.pad} browsers=${browsers.size}`);
-  res.json({ ok: true, browsers: browsers.size });
+  res.json({ ok: true, clients: clients.size });
 });
 
-/** ESP32 → cloud: optional debug logs */
 app.post("/api/log", (req, res) => {
   const payload = req.body && typeof req.body === "object" ? req.body : { msg: String(req.body) };
-  console.log("[esp32-log]", payload);
-  broadcast({ t: "log", ...payload });
+  handleIncoming({ t: "log", ...payload });
   res.json({ ok: true });
 });
 
-/** Browser can also inject a pad event (debug) */
 app.options("/api/pad", (_req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -109,26 +139,33 @@ const server = createServer(app);
 const wss = new WebSocketServer({ server, path: "/ws" });
 
 wss.on("connection", (ws) => {
-  browsers.add(ws);
-  console.log(`[ws] browser connected (${browsers.size})`);
+  clients.add(ws);
+  console.log(`[ws] client connected (${clients.size})`);
   try {
     ws.send(JSON.stringify({ t: "hello", device: "gamebox-server", pads: 4 }));
   } catch {
     /* ignore */
   }
-  ws.on("close", () => {
-    browsers.delete(ws);
-    console.log(`[ws] browser disconnected (${browsers.size})`);
+
+  ws.on("message", (data) => {
+    const text = typeof data === "string" ? data : data.toString();
+    handleIncoming(text, ws);
   });
+
+  ws.on("close", () => {
+    clients.delete(ws);
+    console.log(`[ws] client disconnected (${clients.size})`);
+  });
+
   ws.on("error", () => {
-    browsers.delete(ws);
+    clients.delete(ws);
   });
 });
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`GAME BOX listening on :${PORT}`);
   console.log(`  health  GET  /api/health`);
-  console.log(`  pads    POST /api/pad   { "t":"down"|"up", "pad":0..3 }`);
+  console.log(`  pads    POST /api/pad   (fallback)`);
   console.log(`  logs    POST /api/log`);
-  console.log(`  browser WS   /ws`);
+  console.log(`  relay   WS   /ws   (ESP32 + browsers)`);
 });
