@@ -1,5 +1,5 @@
 /**
- * Foot pad client — connects to ESP32 WebSocket SoftAP.
+ * Foot pad client — connects to ESP32 WebSocket.
  *
  * Pad map (default):
  *   0 → player "a" (Cyan)
@@ -7,11 +7,14 @@
  *   2 → player "k" (Violet)
  *   3 → player "l" (Pink)
  *
- * Override WS URL: ?pads=ws://192.168.4.1:81
- * Or localStorage.setItem("gamebox_ws", "ws://...")
+ * Override WS URL: ?pads=ws://192.168.x.x:81
+ * Or localStorage / UI Connect box.
+ *
+ * Note: HTTPS deploys (e.g. Render) block insecure ws:// (mixed content).
+ * Use keyboard online, or connect pads from a local/http game session.
  */
 
-const DEFAULT_WS = "ws://192.168.4.1:81";
+const LOCAL_DEFAULT_WS = "ws://192.168.4.1:81";
 
 const PAD_TO_KEY = {
   0: "a",
@@ -20,11 +23,20 @@ const PAD_TO_KEY = {
   3: "l",
 };
 
+function isSecurePage() {
+  return typeof location !== "undefined" && location.protocol === "https:";
+}
+
+function isInsecureWs(url) {
+  return typeof url === "string" && url.trim().toLowerCase().startsWith("ws:");
+}
+
 export function createFootPadClient({ onDown, onUp, onStatus }) {
   let socket = null;
   let reconnectTimer = null;
   let intentionalClose = false;
   let url = resolveUrl();
+  let autoConnect = shouldAutoConnect(url);
 
   function resolveUrl() {
     const q = new URLSearchParams(window.location.search).get("pads");
@@ -35,7 +47,14 @@ export function createFootPadClient({ onDown, onUp, onStatus }) {
     } catch {
       /* ignore */
     }
-    return DEFAULT_WS;
+    // SoftAP default only on local/http — never force it on HTTPS deploys
+    return isSecurePage() ? "" : LOCAL_DEFAULT_WS;
+  }
+
+  function shouldAutoConnect(nextUrl) {
+    if (!nextUrl) return false;
+    if (isSecurePage() && isInsecureWs(nextUrl)) return false;
+    return true;
   }
 
   function setStatus(status, detail = "") {
@@ -46,6 +65,11 @@ export function createFootPadClient({ onDown, onUp, onStatus }) {
     intentionalClose = false;
     url = resolveUrl();
 
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+
     if (socket) {
       try {
         socket.close();
@@ -53,6 +77,19 @@ export function createFootPadClient({ onDown, onUp, onStatus }) {
         /* ignore */
       }
       socket = null;
+    }
+
+    if (!url) {
+      setStatus("disconnected", "set ESP32 WS URL to connect pads");
+      return;
+    }
+
+    if (isSecurePage() && isInsecureWs(url)) {
+      setStatus(
+        "error",
+        "HTTPS pages cannot use ws:// — play with keyboard, or open the game over http on the same LAN as the ESP32"
+      );
+      return;
     }
 
     setStatus("connecting", url);
@@ -117,10 +154,11 @@ export function createFootPadClient({ onDown, onUp, onStatus }) {
 
   function scheduleReconnect() {
     if (reconnectTimer) return;
+    if (isSecurePage() && isInsecureWs(url)) return;
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       connect();
-    }, 2000);
+    }, 2500);
   }
 
   function disconnect() {
@@ -137,16 +175,38 @@ export function createFootPadClient({ onDown, onUp, onStatus }) {
   }
 
   function setUrl(next) {
+    const cleaned = (next || "").trim();
     try {
-      localStorage.setItem("gamebox_ws", next);
+      if (cleaned) localStorage.setItem("gamebox_ws", cleaned);
+      else localStorage.removeItem("gamebox_ws");
     } catch {
       /* ignore */
     }
-    url = next;
-    connect();
+    url = cleaned;
+    autoConnect = shouldAutoConnect(url);
+    if (autoConnect) connect();
+    else {
+      disconnect();
+      if (cleaned && isSecurePage() && isInsecureWs(cleaned)) {
+        setStatus(
+          "error",
+          "HTTPS pages cannot use ws:// — need wss:// or a local http game"
+        );
+      } else {
+        setStatus("disconnected", cleaned ? "" : "set ESP32 WS URL to connect pads");
+      }
+    }
   }
 
-  connect();
+  if (autoConnect) connect();
+  else {
+    setStatus(
+      "disconnected",
+      isSecurePage()
+        ? "keyboard ready · pads need local/http or wss://"
+        : "set ESP32 WS URL to connect pads"
+    );
+  }
 
   return {
     connect,
