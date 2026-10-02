@@ -2,8 +2,10 @@
  * Foot pad client — connects to ESP32 WebSocket SoftAP.
  *
  * Pad map (default):
- *   0,1 → player "a" (Bunny Blue)
- *   2,3 → player "l" (Bunny Dash)
+ *   0 → player "a" (Cyan)
+ *   1 → player "s" (Lime)
+ *   2 → player "k" (Violet)
+ *   3 → player "l" (Pink)
  *
  * Override WS URL: ?pads=ws://192.168.4.1:81
  * Or localStorage.setItem("gamebox_ws", "ws://...")
@@ -13,8 +15,8 @@ const DEFAULT_WS = "ws://192.168.4.1:81";
 
 const PAD_TO_KEY = {
   0: "a",
-  1: "a",
-  2: "l",
+  1: "s",
+  2: "k",
   3: "l",
 };
 

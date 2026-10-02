@@ -206,65 +206,84 @@ function metal(color, emissive, emissiveIntensity = 0.3) {
 }
 
 /**
- * Stick upgrades every 5 circles: new color, thicker, hazard parts, harder clear.
+ * Sweeper arms — thick cartoon bars spinning from center totem.
  */
 export function createMetalRope(scene) {
   const pivot = new THREE.Group();
   pivot.position.set(0, ROPE_HEIGHT, 0);
   scene.add(pivot);
 
-  const hub = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.22, 0.28, 0.18, 20),
-    metal(0xb8c0cc, 0x445566, 0.15)
-  );
-  hub.castShadow = true;
-  pivot.add(hub);
+  const barMat = new THREE.MeshStandardMaterial({
+    color: 0xe23d3d,
+    roughness: 0.45,
+    metalness: 0.15,
+    emissive: 0x661111,
+    emissiveIntensity: 0.2,
+    flatShading: true,
+  });
+  const woodMat = new THREE.MeshStandardMaterial({
+    color: 0xd4b896,
+    roughness: 0.7,
+    metalness: 0.05,
+    flatShading: true,
+  });
 
-  const cableMat = metal(0xd0d6e0, 0x223044, 0.15);
+  // Main red sweeper (player must jump this)
   const cable = new THREE.Mesh(
-    new THREE.CylinderGeometry(BASE_RADIUS, BASE_RADIUS * 0.85, ROPE_LENGTH, 20),
-    cableMat
+    new THREE.BoxGeometry(ROPE_LENGTH, 0.28, 0.38),
+    barMat
   );
-  cable.rotation.z = Math.PI / 2;
   cable.position.x = ROPE_LENGTH / 2;
   cable.castShadow = true;
   cable.receiveShadow = true;
   pivot.add(cable);
 
-  const strandMat = metal(0x8a93a3, 0x334455, 0.1);
+  // Lower tan counter-arm (opposite side, like the reference)
   const strand = new THREE.Mesh(
-    new THREE.CylinderGeometry(BASE_RADIUS * 0.45, BASE_RADIUS * 0.4, ROPE_LENGTH * 0.98, 12),
-    strandMat
+    new THREE.BoxGeometry(ROPE_LENGTH * 0.75, 0.22, 0.32),
+    woodMat
   );
-  strand.rotation.z = Math.PI / 2;
-  strand.position.set(ROPE_LENGTH / 2, BASE_RADIUS * 0.7, 0);
+  strand.position.set(-ROPE_LENGTH * 0.32, -0.55, 0);
+  strand.castShadow = true;
   pivot.add(strand);
 
+  // Tip block
   const tip = new THREE.Mesh(
-    new THREE.SphereGeometry(0.16, 24, 18),
-    metal(0xe8ecf2, 0xff4466, 0.35)
+    new THREE.BoxGeometry(0.4, 0.4, 0.45),
+    barMat
   );
-  tip.position.x = ROPE_LENGTH;
+  tip.position.x = ROPE_LENGTH + 0.05;
   tip.castShadow = true;
   pivot.add(tip);
 
+  const hub = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.35, 0.4, 0.5, 8),
+    woodMat
+  );
+  hub.castShadow = true;
+  pivot.add(hub);
+
   const danger = new THREE.Mesh(
-    new THREE.PlaneGeometry(ROPE_LENGTH, 0.35),
+    new THREE.PlaneGeometry(ROPE_LENGTH, 0.5),
     new THREE.MeshBasicMaterial({
       color: 0xff3355,
       transparent: true,
-      opacity: 0.18,
+      opacity: 0.15,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     })
   );
   danger.rotation.x = -Math.PI / 2;
-  danger.position.set(ROPE_LENGTH / 2, -0.45, 0);
+  danger.position.set(ROPE_LENGTH / 2, -0.5, 0);
   pivot.add(danger);
 
-  const tipLight = new THREE.PointLight(0xff4466, 1.6, 6, 2);
+  const tipLight = new THREE.PointLight(0xff4466, 1.2, 7, 2);
   tipLight.position.copy(tip.position);
   pivot.add(tipLight);
+
+  // Keep aliases used by theme code
+  const cableMat = barMat;
+  const strandMat = woodMat;
 
   // Hazard attachments group (cleared/rebuilt each upgrade)
   const extras = new THREE.Group();
@@ -292,6 +311,7 @@ export function createMetalRope(scene) {
   }
 
   let angle = Math.PI * 0.5;
+  let prevAngle = angle;
   let speed = BASE_SPEED;
   let flash = 0;
   let radiusScale = 1;
@@ -307,12 +327,35 @@ export function createMetalRope(scene) {
   const hitCooldown = new Map();
   const listeners = { onUpgrade: null };
 
+  /** Normalize angle into (-π, π] */
+  function wrapPi(a) {
+    while (a > Math.PI) a -= Math.PI * 2;
+    while (a <= -Math.PI) a += Math.PI * 2;
+    return a;
+  }
+
+  /**
+   * Rope tip sits on local +X; with pivot.rotation.y = θ the tip is at
+   * world (cos θ, -sin θ). Matching player angle is atan2(-z, x).
+   */
+  function playerRopeAngle(pos) {
+    return Math.atan2(-pos.z, pos.x);
+  }
+
+  /** True if target lies on the short arc from `from` → `to` (inclusive, with pad). */
+  function arcContains(from, to, target, pad) {
+    const step = wrapPi(to - from);
+    const rel = wrapPi(target - from);
+    if (step >= 0) return rel >= -pad && rel <= step + pad;
+    return rel <= pad && rel >= step - pad;
+  }
+
   function applyRadiusVisual(scale) {
-    cable.scale.set(scale, 1, scale);
-    strand.scale.set(scale, 1, scale);
-    strand.position.y = BASE_RADIUS * 0.7 * scale;
-    tip.scale.setScalar(0.85 + scale * 0.4);
-    danger.scale.set(1, 0.9 + scale * 0.6, 1);
+    // Thicken bars on Y/Z
+    cable.scale.set(1, scale, scale);
+    strand.scale.set(1, scale * 0.9, scale * 0.9);
+    tip.scale.setScalar(0.9 + scale * 0.35);
+    danger.scale.set(1, 0.9 + scale * 0.5, 1);
     extras.scale.setScalar(Math.max(0.85, scale * 0.75));
   }
 
@@ -320,11 +363,9 @@ export function createMetalRope(scene) {
     cableMat.color.setHex(tier.color);
     cableMat.emissive.setHex(tier.emissive);
     cableMat.emissiveIntensity = 0.35;
-    strandMat.color.setHex(tier.color);
-    strandMat.emissive.setHex(tier.emissive);
     tip.material.color.setHex(tier.color);
     tip.material.emissive.setHex(tier.tip);
-    tip.material.emissiveIntensity = 0.7;
+    tip.material.emissiveIntensity = 0.5;
     tipLight.color.setHex(tier.tip);
     danger.material.color.setHex(tier.danger);
     themeColor = tier.tip;
@@ -451,11 +492,13 @@ export function createMetalRope(scene) {
     },
 
     update(dt, time, running) {
+      prevAngle = angle;
       if (running) {
         const step = speed * dt;
         angle += step;
         angleAccum += step;
         while (angle > Math.PI * 2) angle -= Math.PI * 2;
+        while (angle < 0) angle += Math.PI * 2;
 
         while (angleAccum >= Math.PI * 2) {
           angleAccum -= Math.PI * 2;
@@ -523,17 +566,18 @@ export function createMetalRope(scene) {
     checkHit(playerKey, playerPos) {
       if (hitCooldown.has(playerKey)) return false;
 
-      const playerAngle = Math.atan2(playerPos.z, playerPos.x);
-      let delta = angle - playerAngle;
-      while (delta > Math.PI) delta -= Math.PI * 2;
-      while (delta < -Math.PI) delta += Math.PI * 2;
-
       const radial = Math.hypot(playerPos.x, playerPos.z);
-      if (radial < 0.8 || radial > ROPE_LENGTH + 0.25) return false;
-
-      const hitAngle = BASE_HIT_ANGLE * (0.85 + visualRadius * 0.35) * hitMul;
-      if (Math.abs(delta) > hitAngle) return false;
+      // Reach includes tip block so outer pedestals stay in the hit ring
+      if (radial < 0.8 || radial > ROPE_LENGTH + 0.45) return false;
       if (playerPos.y >= clearY) return false;
+
+      const playerAngle = playerRopeAngle(playerPos);
+      const hitAngle = BASE_HIT_ANGLE * (0.85 + visualRadius * 0.35) * hitMul;
+
+      // Near the bar now, or swept across the pad this frame (no tunneling)
+      const nearNow = Math.abs(wrapPi(angle - playerAngle)) <= hitAngle;
+      const swept = arcContains(prevAngle, angle, playerAngle, hitAngle);
+      if (!nearNow && !swept) return false;
 
       hitCooldown.set(playerKey, HIT_COOLDOWN);
       flash = 1;
@@ -547,6 +591,7 @@ export function createMetalRope(scene) {
 
     reset() {
       angle = Math.PI * 0.5;
+      prevAngle = angle;
       speed = BASE_SPEED;
       radiusScale = 1;
       visualRadius = 1;
@@ -563,11 +608,11 @@ export function createMetalRope(scene) {
       hitCooldown.clear();
       applyRadiusVisual(1);
       rebuildExtras();
-      cableMat.color.setHex(0xd0d6e0);
-      cableMat.emissive.setHex(0x223044);
-      cableMat.emissiveIntensity = 0.15;
-      strandMat.color.setHex(0x8a93a3);
-      tip.material.color.setHex(0xe8ecf2);
+      cableMat.color.setHex(0xe23d3d);
+      cableMat.emissive.setHex(0x661111);
+      cableMat.emissiveIntensity = 0.2;
+      strandMat.color.setHex(0xd4b896);
+      tip.material.color.setHex(0xe23d3d);
       tip.material.emissive.setHex(0xff4466);
       tip.material.emissiveIntensity = 0.35;
       tipLight.color.setHex(0xff4466);

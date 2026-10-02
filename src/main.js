@@ -3,7 +3,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { createArena, COLUMN_TOP_Y, PAD_X } from "./arena.js";
+import { createArena, COLUMN_TOP_Y, PLAYER_SLOTS, slotPosition } from "./arena.js";
 import { createJumpling } from "./jumpling.js";
 import { ParticleBurst } from "./particles.js";
 import { createMetalRope } from "./rope.js";
@@ -30,11 +30,12 @@ const GRAVITY = -28;
 const PLATFORM_Y = COLUMN_TOP_Y + 0.12;
 const MAX_LIVES = 3;
 const FALL_GRAVITY = -38;
+const PLAYER_KEYS = PLAYER_SLOTS.map((s) => s.key);
 
 const state = {
   clock: new THREE.Clock(),
-  keys: { a: false, l: false },
-  padHold: { a: 0, l: 0 },
+  keys: Object.fromEntries(PLAYER_KEYS.map((k) => [k, false])),
+  padHold: Object.fromEntries(PLAYER_KEYS.map((k) => [k, 0])),
   started: false,
   running: false,
   gameOver: false,
@@ -51,28 +52,28 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.08;
+renderer.toneMappingExposure = 1.12;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0x7eb8e8, 35, 90);
+scene.fog = new THREE.Fog(0xffd8a8, 42, 95);
 
 const camera = new THREE.PerspectiveCamera(
-  42,
+  40,
   window.innerWidth / window.innerHeight,
   0.1,
   220
 );
-camera.position.set(0, COLUMN_TOP_Y + 5.8, 17);
-camera.lookAt(0, COLUMN_TOP_Y + 0.4, 0);
+camera.position.set(0, COLUMN_TOP_Y + 7.5, 18);
+camera.lookAt(0, COLUMN_TOP_Y - 0.2, 0);
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.38,
-  0.45,
-  0.8
+  0.16,
+  0.35,
+  0.9
 );
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
@@ -117,51 +118,36 @@ function refreshRopeHud() {
   }
 }
 
-const bunnyBlue = createJumpling({
-  name: "Bunny Blue",
-  furColor: 0x9aa3ad,
-  bellyColor: 0xf2f4f6,
-  jerseyColor: 0x2f7bff,
-  shortsColor: 0xff7a1a,
-  shoeColor: 0x2f7bff,
-  number: "7",
-  eyeColor: 0x2a5fd4,
-  position: new THREE.Vector3(-PAD_X, PLATFORM_Y, 0.15),
+const players = {};
+PLAYER_SLOTS.forEach((slot, index) => {
+  const pos = slotPosition(slot, PLATFORM_Y);
+  const jumpling = createJumpling({
+    name: slot.name,
+    bodyColor: slot.bodyColor,
+    accentColor: 0xffffff,
+    eyeColor: 0x1a2030,
+    hat: slot.hat,
+    position: pos,
+  });
+  scene.add(jumpling.group);
+  players[slot.key] = makePlayer(jumpling, slot.key, `p${index + 1}`, index);
 });
-const bunnyOrange = createJumpling({
-  name: "Bunny Dash",
-  furColor: 0xb8a090,
-  bellyColor: 0xfff5ea,
-  jerseyColor: 0xff7a1a,
-  shortsColor: 0x2f7bff,
-  shoeColor: 0xff7a1a,
-  number: "3",
-  eyeColor: 0x3d7a40,
-  position: new THREE.Vector3(PAD_X, PLATFORM_Y, 0.15),
-});
-
-scene.add(bunnyBlue.group, bunnyOrange.group);
-
-const players = {
-  a: makePlayer(bunnyBlue, "a", "p1"),
-  l: makePlayer(bunnyOrange, "l", "p2"),
-};
 
 window.addEventListener("resize", onResize);
 window.addEventListener("keydown", onKeyDown);
 window.addEventListener("keyup", onKeyUp);
 
-refreshLives(players.a);
-refreshLives(players.l);
+for (const p of Object.values(players)) refreshLives(p);
 animate();
 
-function makePlayer(jumpling, key, cardClass) {
+function makePlayer(jumpling, key, cardClass, index) {
   return {
     jumpling,
     key,
+    index,
     card: document.querySelector(`.${cardClass}`),
-    jumpsEl: document.getElementById(`jumps-${cardClass === "p1" ? "p1" : "p2"}`),
-    livesEl: document.getElementById(`lives-${cardClass === "p1" ? "p1" : "p2"}`),
+    jumpsEl: document.getElementById(`jumps-p${index + 1}`),
+    livesEl: document.getElementById(`lives-p${index + 1}`),
     badge: document.querySelector(`.${cardClass} .key-badge`),
     jumps: 0,
     lives: MAX_LIVES,
@@ -187,13 +173,12 @@ function refreshLives(p) {
 }
 
 function createLights(scene) {
-  scene.add(new THREE.AmbientLight(0xfff6e8, 0.55));
+  scene.add(new THREE.AmbientLight(0xfff0dd, 0.7));
 
-  const hemi = new THREE.HemisphereLight(0xb8e0ff, 0x8fbf60, 0.85);
+  const hemi = new THREE.HemisphereLight(0xa8d8ff, 0xe08a40, 0.75);
   scene.add(hemi);
 
-  // Warm sun from upper-left (like the reference photo)
-  const sun = new THREE.DirectionalLight(0xfff3d6, 1.55);
+  const sun = new THREE.DirectionalLight(0xfff5e0, 1.35);
   sun.position.set(-12, COLUMN_TOP_Y + 16, 10);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -206,11 +191,11 @@ function createLights(scene) {
   sun.shadow.bias = -0.00025;
   scene.add(sun);
 
-  const fill = new THREE.DirectionalLight(0xa8d8ff, 0.4);
+  const fill = new THREE.DirectionalLight(0xffc080, 0.35);
   fill.position.set(8, 6, -6);
   scene.add(fill);
 
-  const bounce = new THREE.PointLight(0xffe0a0, 1.4, 35, 2);
+  const bounce = new THREE.PointLight(0xffcc88, 1.0, 35, 2);
   bounce.position.set(0, COLUMN_TOP_Y + 2, 4);
   scene.add(bounce);
 }
@@ -233,14 +218,14 @@ function onKeyDown(e) {
   }
 
   const k = e.key.toLowerCase();
-  if (k !== "a" && k !== "l") return;
+  if (!PLAYER_KEYS.includes(k)) return;
   if (e.repeat) return;
   pressPlayer(k);
 }
 
 function onKeyUp(e) {
   const k = e.key.toLowerCase();
-  if (k !== "a" && k !== "l") return;
+  if (!PLAYER_KEYS.includes(k)) return;
   releasePlayer(k);
 }
 
@@ -291,12 +276,15 @@ function releasePlayer(k) {
   jump(p, power);
 }
 
-// Foot pads via ESP32 WebSocket (pads 0/1 → A, pads 2/3 → L)
+// Foot pads via ESP32 WebSocket (0→A, 1→S, 2→K, 3→L)
 const padsStatusEl = document.getElementById("pads-status");
-createFootPadClient({
+const padsUrlInput = document.getElementById("pads-url");
+const padsConnectBtn = document.getElementById("pads-connect-btn");
+
+const footPads = createFootPadClient({
   onDown: (key) => pressPlayer(key),
   onUp: (key) => releasePlayer(key),
-  onStatus: ({ status, detail }) => {
+  onStatus: ({ status, detail, url }) => {
     if (!padsStatusEl) return;
     padsStatusEl.dataset.status = status;
     const labels = {
@@ -305,11 +293,39 @@ createFootPadClient({
       disconnected: "Pads offline",
       error: "Pads error",
     };
-    padsStatusEl.textContent = detail && status === "connected"
-      ? `Pads online · ${detail}`
-      : labels[status] || status;
+    padsStatusEl.textContent =
+      status === "connected"
+        ? `Pads online`
+        : status === "connecting"
+          ? `Pads connecting…`
+          : labels[status] || status;
+    if (padsUrlInput && url && document.activeElement !== padsUrlInput) {
+      padsUrlInput.value = url;
+    }
+    if (detail && status !== "connected") {
+      padsStatusEl.title = detail;
+    } else if (url) {
+      padsStatusEl.title = url;
+    }
   },
 });
+
+if (padsUrlInput) {
+  padsUrlInput.value = footPads.getUrl();
+}
+if (padsConnectBtn && padsUrlInput) {
+  padsConnectBtn.addEventListener("click", () => {
+    const next = padsUrlInput.value.trim();
+    if (!next) return;
+    footPads.setUrl(next);
+  });
+  padsUrlInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      padsConnectBtn.click();
+    }
+  });
+}
 
 function jump(p, power) {
   p.grounded = false;
@@ -322,7 +338,7 @@ function jump(p, power) {
 
   const pos = p.jumpling.group.position;
   particles.burst(pos.x, PLATFORM_Y + 0.05, pos.z, p.jumpling.bodyColor);
-  arena.pulsePad(p.jumpling.group.position.x > 0 ? 1 : 0);
+  arena.pulsePad(p.index);
 }
 
 function hitPlayer(p) {
@@ -383,6 +399,11 @@ function resetRound() {
   toastTimer = 0;
   arenaUpgradePulse = 0;
 
+  for (const k of PLAYER_KEYS) {
+    state.keys[k] = false;
+    state.padHold[k] = 0;
+  }
+
   for (const p of Object.values(players)) {
     p.lives = MAX_LIVES;
     p.jumps = 0;
@@ -394,6 +415,7 @@ function resetRound() {
     p.squash = 1;
     p.peak = 0;
     p.hitFlash = 0;
+    p.chargeStart = 0;
     p.jumpling.group.visible = true;
     p.jumpling.group.rotation.set(0, 0, 0);
     p.jumpling.group.position.copy(p.spawn);
@@ -401,6 +423,7 @@ function resetRound() {
     p.jumpsEl.textContent = "0";
     refreshLives(p);
     p.card.classList.remove("out", "hit");
+    p.badge.classList.remove("pressed");
   }
 }
 
@@ -411,7 +434,9 @@ function updatePlayer(p, dt, time) {
   if (p.falling) {
     p.vy += FALL_GRAVITY * dt;
     g.position.y += p.vy * dt;
-    g.position.x += Math.sign(g.position.x || 1) * 1.8 * dt;
+    const outward = Math.hypot(g.position.x, g.position.z) || 1;
+    g.position.x += (g.position.x / outward) * 2.4 * dt;
+    g.position.z += (g.position.z / outward) * 2.4 * dt;
     g.rotation.z += dt * 3.5 * Math.sign(g.position.x || 1);
     g.rotation.x += dt * 2.2;
     p.squash = 1.15;
@@ -421,7 +446,7 @@ function updatePlayer(p, dt, time) {
       g.visible = false;
       particles.burst(g.position.x, -5, g.position.z, new THREE.Color(0x88aacc));
       if (Object.values(players).every((pl) => !pl.alive && pl.fallDone)) {
-        endRound("Both fell!");
+        endRound("Everyone fell!");
       }
     }
 
@@ -445,7 +470,7 @@ function updatePlayer(p, dt, time) {
       p.squash = 0.72;
       particles.land(g.position.x, PLATFORM_Y + 0.05, g.position.z, p.jumpling.bodyColor);
       p.jumpling.playLand();
-      arena.pulsePad(g.position.x > 0 ? 1 : 0);
+      arena.pulsePad(p.index);
     }
   } else if (state.keys[p.key]) {
     const held = Math.min(1, (performance.now() - p.chargeStart) / CHARGE_MS);
@@ -468,8 +493,7 @@ function animate() {
   const dt = Math.min(0.033, state.clock.getDelta());
   const time = state.clock.elapsedTime;
 
-  updatePlayer(players.a, dt, time);
-  updatePlayer(players.l, dt, time);
+  for (const p of Object.values(players)) updatePlayer(p, dt, time);
   particles.update(dt);
   skyWorld.update(time, dt);
   arenaUpgradePulse *= 0.9;
@@ -497,14 +521,11 @@ function animate() {
 
   // Camera framed on elevated columns
   const punch = arenaUpgradePulse * 0.4;
+  const maxPeak = Math.max(0, ...Object.values(players).map((p) => p.peak));
   camera.position.x = Math.sin(time * 0.25) * 0.4;
-  camera.position.y = COLUMN_TOP_Y + 5.8 + Math.sin(time * 0.4) * 0.15 + punch;
-  camera.position.z = 17 - punch * 1.5;
-  camera.lookAt(
-    0,
-    COLUMN_TOP_Y + 0.5 + Math.max(players.a.peak, players.l.peak) * 0.12,
-    0
-  );
+  camera.position.y = COLUMN_TOP_Y + 7.5 + Math.sin(time * 0.4) * 0.15 + punch;
+  camera.position.z = 18 - punch * 1.5;
+  camera.lookAt(0, COLUMN_TOP_Y - 0.2 + maxPeak * 0.1, 0);
 
   composer.render();
 }

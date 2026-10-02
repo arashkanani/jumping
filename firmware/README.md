@@ -19,16 +19,16 @@
 
 - **ESP32** reads 4 mechanical keys, debounces, broadcasts JSON over WebSocket.
 - **Phone/PC** joins ESP32 WiFi, opens the game, auto-connects to `ws://192.168.4.1:81`.
-- Keyboard `A`/`L` still works for testing without hardware.
+- Keyboard `A`/`S`/`K`/`L` still works for testing without hardware.
 
 ## Pad → player map
 
 | Pad | GPIO (default) | Player |
 |-----|----------------|--------|
-| 0   | 32             | Blue (A) |
-| 1   | 33             | Blue (A) |
-| 2   | 25             | Orange (L) |
-| 3   | 26             | Orange (L) |
+| 0   | 32             | Cyan Bean (A) |
+| 1   | 33             | Lime Bean (S) |
+| 2   | 25             | Violet Bean (K) |
+| 3   | 26             | Pink Bean (L) |
 
 Stomp = charge jump, release = jump (same as keyboard hold/release).
 

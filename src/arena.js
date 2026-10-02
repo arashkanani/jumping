@@ -1,287 +1,170 @@
 import * as THREE from "three";
 
-/** Column tops where players stand */
-export const COLUMN_TOP_Y = 6.2;
-export const COLUMN_RADIUS = 4.2;
-export const PAD_X = 4.2;
+/** Pedestal tops where players stand */
+export const COLUMN_TOP_Y = 5.4;
+export const PED_RADIUS = 4.95; // +10% spacing between player columns
+/** @deprecated use PED_RADIUS / PLAYER_SLOTS */
+export const PAD_X = PED_RADIUS;
+
+/** 4 player slots around the totem (angle 0 = toward camera +Z) */
+export const PLAYER_SLOTS = [
+  {
+    key: "a",
+    label: "A",
+    name: "Cyan Bean",
+    bodyColor: 0x3dcfff,
+    emissive: 0x1a8ab8,
+    angle: -1.05,
+    hat: false,
+  },
+  {
+    key: "s",
+    label: "S",
+    name: "Lime Bean",
+    bodyColor: 0x6dff5a,
+    emissive: 0x2a9a28,
+    angle: -0.38,
+    hat: true,
+  },
+  {
+    key: "k",
+    label: "K",
+    name: "Violet Bean",
+    bodyColor: 0xb06bff,
+    emissive: 0x6020a8,
+    angle: 0.38,
+    hat: false,
+  },
+  {
+    key: "l",
+    label: "L",
+    name: "Pink Bean",
+    bodyColor: 0xff6bcb,
+    emissive: 0xc02080,
+    angle: 1.05,
+    hat: true,
+  },
+];
+
+export function slotPosition(slot, y = 0) {
+  return new THREE.Vector3(
+    Math.sin(slot.angle) * PED_RADIUS,
+    y,
+    Math.cos(slot.angle) * PED_RADIUS
+  );
+}
 
 /**
- * Elevated column arena — players stand high; dense scenic world below.
+ * Desert canyon arena — Jumplings / Fall Guys vibe.
  */
 export function createArena(scene) {
   const root = new THREE.Group();
   scene.add(root);
 
-  // Deep canyon / mist floor far below
-  const abyss = new THREE.Mesh(
-    new THREE.CircleGeometry(55, 64),
+  // Cracked orange desert floor
+  const ground = new THREE.Mesh(
+    new THREE.CircleGeometry(42, 72),
     new THREE.MeshStandardMaterial({
-      color: 0x1a2840,
-      roughness: 1,
-      metalness: 0.05,
-      emissive: 0x0a1528,
-      emissiveIntensity: 0.3,
+      map: makeCrackTexture(),
+      roughness: 0.95,
+      metalness: 0.02,
+      flatShading: true,
     })
   );
-  abyss.rotation.x = -Math.PI / 2;
-  abyss.position.y = -8;
-  abyss.receiveShadow = true;
-  root.add(abyss);
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.02;
+  ground.receiveShadow = true;
+  root.add(ground);
 
-  // Fog layers / mist discs
-  for (let i = 0; i < 6; i++) {
-    const mist = new THREE.Mesh(
-      new THREE.CircleGeometry(12 + i * 4, 48),
-      new THREE.MeshBasicMaterial({
-        color: i % 2 === 0 ? 0xa8d4ff : 0xc8e8ff,
-        transparent: true,
-        opacity: 0.06 + i * 0.015,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      })
-    );
-    mist.rotation.x = -Math.PI / 2;
-    mist.position.y = -6 + i * 1.2;
-    root.add(mist);
-  }
-
-  // Water / lava-glow river far below
-  const river = new THREE.Mesh(
-    new THREE.PlaneGeometry(80, 14),
-    new THREE.MeshStandardMaterial({
-      color: 0x1e90ff,
-      emissive: 0x0a4a8a,
-      emissiveIntensity: 0.55,
-      roughness: 0.15,
-      metalness: 0.4,
-      transparent: true,
-      opacity: 0.85,
-    })
-  );
-  river.rotation.x = -Math.PI / 2;
-  river.position.set(0, -7.5, 0);
-  root.add(river);
-
-  // Floating rock islands densely packed
-  for (let i = 0; i < 28; i++) {
-    const island = makeRockIsland(0.8 + Math.random() * 1.8);
-    const a = (i / 28) * Math.PI * 2 + Math.random() * 0.2;
-    const r = 8 + Math.random() * 22;
-    island.position.set(Math.cos(a) * r, -3 + Math.random() * 5, Math.sin(a) * r);
-    // Keep clear of play columns
-    if (Math.hypot(island.position.x, island.position.z) < 6.5) {
-      island.position.x *= 1.8;
-      island.position.z *= 1.8;
-    }
-    root.add(island);
-  }
-
-  // Decorative ancient pillars around
-  for (let i = 0; i < 16; i++) {
-    const a = (i / 16) * Math.PI * 2;
-    const r = 9 + (i % 3) * 1.5;
-    const h = 3 + (i % 4) * 1.2;
-    const pillar = makeRuinPillar(h);
-    pillar.position.set(Math.cos(a) * r, -2, Math.sin(a) * r);
-    if (Math.hypot(pillar.position.x, pillar.position.z) < 6) continue;
-    root.add(pillar);
-  }
-
-  // Trees & crystal clusters on islands
-  for (let i = 0; i < 20; i++) {
-    const a = Math.random() * Math.PI * 2;
-    const r = 10 + Math.random() * 18;
-    const tree = makeFancyTree(0.7 + Math.random() * 0.6);
-    tree.position.set(Math.cos(a) * r, -1 + Math.random() * 3, Math.sin(a) * r);
-    root.add(tree);
-  }
-
-  for (let i = 0; i < 18; i++) {
-    const crystal = makeCrystal();
-    const a = Math.random() * Math.PI * 2;
-    const r = 7 + Math.random() * 16;
-    crystal.position.set(Math.cos(a) * r, -2 + Math.random() * 4, Math.sin(a) * r);
-    root.add(crystal);
-  }
-
-  // Floating lanterns
-  const lanterns = [];
-  for (let i = 0; i < 24; i++) {
-    const lantern = makeLantern();
-    const a = (i / 24) * Math.PI * 2;
-    const r = 6 + Math.random() * 14;
-    lantern.position.set(
-      Math.cos(a) * r,
-      2 + Math.random() * 6,
-      Math.sin(a) * r
-    );
-    root.add(lantern);
-    lanterns.push({
-      mesh: lantern,
-      baseY: lantern.position.y,
-      phase: Math.random() * Math.PI * 2,
-    });
-  }
-
-  // Torches / braziers around play ring
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2 + 0.2;
-    const torch = makeTorch();
-    torch.position.set(Math.cos(a) * 6.8, COLUMN_TOP_Y - 1.2, Math.sin(a) * 6.8);
-    root.add(torch);
-  }
-
-  // Central hub column (rope pivot base)
-  const hub = makePlayColumn(1.1, COLUMN_TOP_Y + 0.4, 0x6a5a4a, 0xffd166);
-  hub.position.set(0, 0, 0);
-  root.add(hub);
-
-  // Player columns
-  const colA = makePlayColumn(1.05, COLUMN_TOP_Y, 0x3d6bbf, 0x5c9aff);
-  colA.position.set(-PAD_X, 0, 0.15);
-  root.add(colA);
-
-  const colB = makePlayColumn(1.05, COLUMN_TOP_Y, 0xc45a18, 0xff9a4a);
-  colB.position.set(PAD_X, 0, 0.15);
-  root.add(colB);
-
-  // Pads on column tops
-  const padMatA = new THREE.MeshStandardMaterial({
-    color: 0x3d8bff,
-    emissive: 0x1a5fd0,
-    emissiveIntensity: 0.45,
-    roughness: 0.4,
-    transparent: true,
-    opacity: 0.9,
-  });
-  const padMatB = new THREE.MeshStandardMaterial({
-    color: 0xff8a3d,
-    emissive: 0xd45a10,
-    emissiveIntensity: 0.45,
-    roughness: 0.4,
-    transparent: true,
-    opacity: 0.9,
-  });
-
-  const padA = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.95, 0.12, 40), padMatA);
-  padA.position.set(-PAD_X, COLUMN_TOP_Y + 0.06, 0.15);
-  padA.castShadow = true;
-  root.add(padA);
-
-  const padB = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.95, 0.12, 40), padMatB);
-  padB.position.set(PAD_X, COLUMN_TOP_Y + 0.06, 0.15);
-  padB.castShadow = true;
-  root.add(padB);
-
-  // Pad glow rings
-  for (const [pad, col] of [
-    [padA, 0x66b0ff],
-    [padB, 0xffb070],
-  ]) {
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(1.0, 0.05, 10, 40),
-      new THREE.MeshBasicMaterial({
-        color: col,
-        transparent: true,
-        opacity: 0.55,
-        blending: THREE.AdditiveBlending,
-      })
-    );
-    ring.rotation.x = Math.PI / 2;
-    ring.position.copy(pad.position);
-    ring.position.y += 0.08;
-    root.add(ring);
-  }
-
-  addPadLabel(root, "A", -PAD_X, COLUMN_TOP_Y + 0.14, 0.15);
-  addPadLabel(root, "L", PAD_X, COLUMN_TOP_Y + 0.14, 0.15);
-
-  // Center gem on hub
-  const gem = new THREE.Mesh(
-    new THREE.OctahedronGeometry(0.38, 0),
-    new THREE.MeshStandardMaterial({
-      color: 0xffd166,
-      emissive: 0xffaa00,
-      emissiveIntensity: 0.75,
-      roughness: 0.18,
-      metalness: 0.65,
-    })
-  );
-  gem.position.y = COLUMN_TOP_Y + 0.55;
-  root.add(gem);
-
-  const gemHalo = new THREE.Mesh(
-    new THREE.SphereGeometry(0.55, 20, 14),
+  // Soft warm ground glow
+  const glow = new THREE.Mesh(
+    new THREE.CircleGeometry(18, 48),
     new THREE.MeshBasicMaterial({
-      color: 0xffe08a,
+      color: 0xffb84d,
       transparent: true,
-      opacity: 0.25,
+      opacity: 0.12,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     })
   );
-  gemHalo.position.copy(gem.position);
-  root.add(gemHalo);
+  glow.rotation.x = -Math.PI / 2;
+  glow.position.y = 0.01;
+  root.add(glow);
 
-  const gemLight = new THREE.PointLight(0xffd166, 2.8, 14, 2);
-  gemLight.position.set(0, COLUMN_TOP_Y + 1.2, 0);
-  root.add(gemLight);
-
-  // Bridge beams between hub and player columns (visual only)
-  for (const x of [-PAD_X / 2, PAD_X / 2]) {
-    const beam = new THREE.Mesh(
-      new THREE.BoxGeometry(PAD_X * 0.85, 0.12, 0.35),
-      new THREE.MeshStandardMaterial({
-        color: 0x8a7a60,
-        roughness: 0.7,
-        metalness: 0.15,
-      })
-    );
-    beam.position.set(x, COLUMN_TOP_Y - 0.35, 0.15);
-    beam.castShadow = true;
-    root.add(beam);
+  // Low-poly rock mountains ring — keep camera front ( +Z ) clear
+  for (let i = 0; i < 20; i++) {
+    const a = (i / 20) * Math.PI * 2 + 0.05;
+    const r = 15.5 + (i % 4) * 2.2;
+    const x = Math.cos(a) * r;
+    const z = Math.sin(a) * r;
+    // Skip anything toward / near the camera
+    if (z > 4) continue;
+    const rock = makeLowPolyRock(2.2 + (i % 5) * 1.05, {
+      snow: i % 3 !== 0,
+      warm: i % 2 === 0,
+    });
+    rock.position.set(x, -0.4, z);
+    rock.rotation.y = a + Math.random() * 0.4;
+    root.add(rock);
   }
 
-  // Waterfalls from floating rocks
-  for (let i = 0; i < 5; i++) {
-    const fall = makeWaterfall();
-    const a = (i / 5) * Math.PI * 2 + 0.5;
-    fall.position.set(Math.cos(a) * 14, 1, Math.sin(a) * 14);
-    root.add(fall);
+  // Extra backdrop cliffs — only behind the arena
+  for (let i = 0; i < 10; i++) {
+    const rock = makeLowPolyRock(2.8 + i * 0.45, {
+      snow: true,
+      warm: i % 2 === 0,
+      wide: true,
+    });
+    rock.position.set((i - 4.5) * 4.2, -0.6, -20 - (i % 3) * 2.8);
+    rock.rotation.y = (Math.random() - 0.5) * 0.6;
+    root.add(rock);
   }
 
-  // Banners hanging from sky hooks
-  for (let i = 0; i < 6; i++) {
-    const banner = makeBanner(i % 2 === 0 ? 0x2f7bff : 0xff7a1a);
-    const a = (i / 6) * Math.PI * 2;
-    banner.position.set(Math.cos(a) * 11, COLUMN_TOP_Y + 2, Math.sin(a) * 11);
-    root.add(banner);
-  }
-
-  // Sparkle dust around columns
-  const sparkCount = 120;
-  const sparkPos = new Float32Array(sparkCount * 3);
-  for (let i = 0; i < sparkCount; i++) {
+  // Cacti
+  for (let i = 0; i < 12; i++) {
     const a = Math.random() * Math.PI * 2;
-    const r = 3 + Math.random() * 8;
-    sparkPos[i * 3] = Math.cos(a) * r;
-    sparkPos[i * 3 + 1] = COLUMN_TOP_Y - 2 + Math.random() * 5;
-    sparkPos[i * 3 + 2] = Math.sin(a) * r;
+    const r = 9 + Math.random() * 12;
+    if (r < 7) continue;
+    const cactus = makeCactus();
+    cactus.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+    if (Math.sin(a) * r > 8) continue; // keep camera front clearer
+    root.add(cactus);
   }
-  const sparks = new THREE.Points(
-    new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(sparkPos, 3)),
-    new THREE.PointsMaterial({
-      color: 0xffe8a0,
-      size: 0.08,
-      transparent: true,
-      opacity: 0.75,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    })
-  );
-  root.add(sparks);
 
-  const pulse = [0, 0];
+  // Wooden rail fence arcs
+  buildFenceArc(root, 12, -Math.PI * 0.15, Math.PI * 1.15, 14);
+
+  // Central totem / sweeper tower
+  const totem = makeTotem(COLUMN_TOP_Y + 1.6);
+  root.add(totem);
+
+  // 4 player pedestals + pads
+  const padMats = [];
+  const padMeshes = [];
+  const pulse = [0, 0, 0, 0];
+
+  PLAYER_SLOTS.forEach((slot, i) => {
+    const pos = slotPosition(slot, 0);
+    const ped = makePedestal(COLUMN_TOP_Y);
+    ped.position.copy(pos);
+    root.add(ped);
+
+    const mat = new THREE.MeshStandardMaterial({
+      color: slot.bodyColor,
+      emissive: slot.emissive,
+      emissiveIntensity: 0.25,
+      roughness: 0.45,
+    });
+    padMats.push(mat);
+    const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.85, 0.14, 6), mat);
+    pad.position.set(pos.x, COLUMN_TOP_Y + 0.08, pos.z);
+    pad.castShadow = true;
+    root.add(pad);
+    padMeshes.push(pad);
+
+    addPadLabel(root, slot.label, pos.x, COLUMN_TOP_Y + 0.16, pos.z);
+  });
+
   let upgradeFlash = 0;
   const fallingBits = [];
 
@@ -290,42 +173,20 @@ export function createArena(scene) {
     update(time, opts = {}) {
       const { upgradePulse = 0 } = opts;
       upgradeFlash = Math.max(upgradeFlash * 0.92, upgradePulse);
+      glow.material.opacity = 0.1 + 0.04 * Math.sin(time * 0.8) + upgradeFlash * 0.12;
 
-      gem.rotation.y = time * 0.9;
-      gem.rotation.x = Math.sin(time * 0.7) * 0.2;
-      gem.position.y = COLUMN_TOP_Y + 0.55 + Math.sin(time * 2.2) * 0.06;
-      gemHalo.position.copy(gem.position);
-      gemHalo.scale.setScalar(1 + Math.sin(time * 3) * 0.08 + upgradeFlash * 0.4);
-      gemHalo.material.opacity = 0.2 + upgradeFlash * 0.45;
-      gemLight.intensity = 2.4 + Math.sin(time * 4) * 0.4 + upgradeFlash * 3;
-
-      for (const L of lanterns) {
-        L.mesh.position.y = L.baseY + Math.sin(time * 1.1 + L.phase) * 0.45;
-        L.mesh.rotation.y = time * 0.4 + L.phase;
+      for (let i = 0; i < pulse.length; i++) {
+        pulse[i] *= 0.92;
+        padMats[i].emissiveIntensity = 0.25 + pulse[i] * 0.9;
+        padMeshes[i].scale.setScalar(1 + pulse[i] * 0.08);
       }
-
-      // Drift sparkles
-      const arr = sparks.geometry.attributes.position.array;
-      for (let i = 0; i < sparkCount; i++) {
-        arr[i * 3 + 1] += Math.sin(time * 2 + i) * 0.004;
-      }
-      sparks.geometry.attributes.position.needsUpdate = true;
-
-      pulse[0] *= 0.92;
-      pulse[1] *= 0.92;
-      padMatA.emissiveIntensity = 0.45 + pulse[0] * 1.1;
-      padMatB.emissiveIntensity = 0.45 + pulse[1] * 1.1;
-      padA.scale.setScalar(1 + pulse[0] * 0.1);
-      padB.scale.setScalar(1 + pulse[1] * 0.1);
-
-      river.material.emissiveIntensity = 0.45 + Math.sin(time * 1.5) * 0.1;
 
       for (let i = fallingBits.length - 1; i >= 0; i--) {
         const b = fallingBits[i];
         b.life -= 0.016;
         b.mesh.position.addScaledVector(b.vel, 0.016);
         b.vel.y -= 18 * 0.016;
-        b.mesh.rotation.x += 0.08;
+        b.mesh.rotation.x += 0.1;
         if (b.life <= 0) {
           root.remove(b.mesh);
           fallingBits.splice(i, 1);
@@ -333,78 +194,53 @@ export function createArena(scene) {
       }
     },
     pulsePad(index) {
-      pulse[index] = 1;
+      if (index >= 0 && index < pulse.length) pulse[index] = 1;
     },
     pulseUpgrade() {
       upgradeFlash = 1;
     },
-    // Debris when someone falls
     burstDebris(x, y, z) {
-      for (let i = 0; i < 14; i++) {
+      for (let i = 0; i < 12; i++) {
         const mesh = new THREE.Mesh(
-          new THREE.BoxGeometry(0.12, 0.12, 0.12),
-          new THREE.MeshStandardMaterial({
-            color: 0x8a7a60,
-            roughness: 0.8,
-          })
+          new THREE.BoxGeometry(0.15, 0.12, 0.15),
+          new THREE.MeshStandardMaterial({ color: 0xc4a574, flatShading: true, roughness: 0.85 })
         );
         mesh.position.set(x, y, z);
         root.add(mesh);
         fallingBits.push({
           mesh,
-          vel: new THREE.Vector3(
-            (Math.random() - 0.5) * 6,
-            2 + Math.random() * 4,
-            (Math.random() - 0.5) * 6
-          ),
-          life: 1.2 + Math.random(),
+          vel: new THREE.Vector3((Math.random() - 0.5) * 5, 2 + Math.random() * 3, (Math.random() - 0.5) * 5),
+          life: 1 + Math.random(),
         });
       }
     },
   };
 }
 
-function makePlayColumn(radius, height, stoneColor, glowColor) {
+function makePedestal(height) {
   const g = new THREE.Group();
-
+  // Hexagonal wooden pillar
   const shaft = new THREE.Mesh(
-    new THREE.CylinderGeometry(radius * 0.85, radius * 1.15, height, 20),
+    new THREE.CylinderGeometry(0.95, 1.15, height, 6),
     new THREE.MeshStandardMaterial({
-      color: stoneColor,
-      roughness: 0.72,
-      metalness: 0.12,
-      map: makeStoneTexture(stoneColor),
+      map: makeWoodTexture(),
+      roughness: 0.85,
+      metalness: 0.05,
+      flatShading: true,
     })
   );
-  shaft.position.y = height / 2 - 0.05;
+  shaft.position.y = height / 2;
   shaft.castShadow = true;
   shaft.receiveShadow = true;
   g.add(shaft);
 
-  // Ring bands
-  for (let i = 1; i <= 4; i++) {
-    const band = new THREE.Mesh(
-      new THREE.TorusGeometry(radius * 0.9, 0.06, 8, 32),
-      new THREE.MeshStandardMaterial({
-        color: glowColor,
-        emissive: glowColor,
-        emissiveIntensity: 0.35,
-        metalness: 0.5,
-        roughness: 0.35,
-      })
-    );
-    band.rotation.x = Math.PI / 2;
-    band.position.y = (height / 5) * i;
-    g.add(band);
-  }
-
-  // Capital
+  // Top cap
   const cap = new THREE.Mesh(
-    new THREE.CylinderGeometry(radius * 1.25, radius * 0.95, 0.35, 20),
+    new THREE.CylinderGeometry(1.05, 0.95, 0.28, 6),
     new THREE.MeshStandardMaterial({
-      color: 0xd8c8a8,
-      roughness: 0.55,
-      metalness: 0.2,
+      color: 0xd4b896,
+      roughness: 0.7,
+      flatShading: true,
     })
   );
   cap.position.y = height;
@@ -413,213 +249,251 @@ function makePlayColumn(radius, height, stoneColor, glowColor) {
 
   // Base
   const base = new THREE.Mesh(
-    new THREE.CylinderGeometry(radius * 1.35, radius * 1.5, 0.5, 20),
-    new THREE.MeshStandardMaterial({ color: 0x4a4035, roughness: 0.85 })
+    new THREE.CylinderGeometry(1.25, 1.4, 0.4, 6),
+    new THREE.MeshStandardMaterial({ color: 0xa88860, roughness: 0.9, flatShading: true })
   );
-  base.position.y = 0.1;
+  base.position.y = 0.15;
   base.receiveShadow = true;
   g.add(base);
 
   return g;
 }
 
-function makeRockIsland(scale) {
+function makeTotem(height) {
   const g = new THREE.Group();
-  const rock = new THREE.Mesh(
-    new THREE.DodecahedronGeometry(scale, 0),
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.7, 0.95, height, 8),
     new THREE.MeshStandardMaterial({
-      color: 0x6a7a68,
-      roughness: 0.9,
+      color: 0xcbb089,
+      roughness: 0.75,
       flatShading: true,
+      map: makeWoodTexture(),
     })
   );
-  rock.scale.set(1.4, 0.55, 1.2);
-  rock.castShadow = true;
-  rock.receiveShadow = true;
-  g.add(rock);
+  body.position.y = height / 2;
+  body.castShadow = true;
+  g.add(body);
 
-  const grass = new THREE.Mesh(
-    new THREE.SphereGeometry(scale * 0.7, 12, 8),
-    new THREE.MeshStandardMaterial({ color: 0x5faf3c, roughness: 0.85 })
-  );
-  grass.scale.set(1.3, 0.35, 1.2);
-  grass.position.y = scale * 0.25;
-  g.add(grass);
-  return g;
-}
-
-function makeRuinPillar(h) {
-  const g = new THREE.Group();
-  const p = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.28, 0.35, h, 8),
-    new THREE.MeshStandardMaterial({
-      color: 0x9a8a78,
-      roughness: 0.85,
-      flatShading: true,
-    })
-  );
-  p.position.y = h / 2;
-  p.castShadow = true;
-  g.add(p);
-  if (Math.random() > 0.4) {
-    const broken = new THREE.Mesh(
-      new THREE.BoxGeometry(0.5, 0.3, 0.4),
-      new THREE.MeshStandardMaterial({ color: 0x8a7a68, roughness: 0.9 })
-    );
-    broken.position.set(0.2, h + 0.1, 0);
-    broken.rotation.z = 0.4;
-    g.add(broken);
-  }
-  return g;
-}
-
-function makeFancyTree(s) {
-  const g = new THREE.Group();
-  const trunk = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.12 * s, 0.2 * s, 1.2 * s, 8),
-    new THREE.MeshStandardMaterial({ color: 0x6a4428, roughness: 0.9 })
-  );
-  trunk.position.y = 0.6 * s;
-  trunk.castShadow = true;
-  g.add(trunk);
-  const leafCols = [0x4caf50, 0x66bb6a, 0x2e7d32];
-  for (let i = 0; i < 3; i++) {
-    const canopy = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.55 * s * (1 - i * 0.12), 0),
+  // Red rings
+  for (let i = 1; i <= 3; i++) {
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.78, 0.08, 8, 20),
       new THREE.MeshStandardMaterial({
-        color: leafCols[i],
-        roughness: 0.75,
+        color: 0xe23d3d,
+        emissive: 0x881111,
+        emissiveIntensity: 0.2,
+        roughness: 0.5,
         flatShading: true,
       })
     );
-    canopy.position.y = 1.3 * s + i * 0.35 * s;
-    canopy.castShadow = true;
-    g.add(canopy);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = (height / 4) * i;
+    g.add(ring);
   }
+
+  const top = new THREE.Mesh(
+    new THREE.ConeGeometry(0.55, 0.7, 6),
+    new THREE.MeshStandardMaterial({ color: 0xe23d3d, flatShading: true, roughness: 0.55 })
+  );
+  top.position.y = height + 0.25;
+  g.add(top);
+
   return g;
 }
 
-function makeCrystal() {
-  const colors = [0x66f0ff, 0xff66ee, 0xffd166, 0x88ff88];
-  const c = colors[(Math.random() * colors.length) | 0];
-  const mesh = new THREE.Mesh(
-    new THREE.OctahedronGeometry(0.25 + Math.random() * 0.35, 0),
-    new THREE.MeshStandardMaterial({
-      color: c,
-      emissive: c,
-      emissiveIntensity: 0.55,
-      roughness: 0.2,
-      metalness: 0.5,
-      transparent: true,
-      opacity: 0.9,
-    })
-  );
-  mesh.rotation.set(Math.random(), Math.random(), Math.random());
-  mesh.castShadow = true;
-  return mesh;
-}
-
-function makeLantern() {
+function makeLowPolyRock(scale, opts = {}) {
+  const { snow = true, warm = false, wide = false } = opts;
   const g = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.SphereGeometry(0.22, 14, 10),
-    new THREE.MeshStandardMaterial({
-      color: 0xffaa44,
-      emissive: 0xff7700,
-      emissiveIntensity: 0.8,
-      roughness: 0.35,
-      transparent: true,
-      opacity: 0.85,
-    })
-  );
-  g.add(body);
-  const light = new THREE.PointLight(0xffaa44, 0.7, 5, 2);
-  g.add(light);
-  const string = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.01, 0.01, 0.8, 4),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 })
-  );
-  string.position.y = 0.5;
-  g.add(string);
+
+  // Palette like the reference: warm sand base → cool grey mid → bright white peaks
+  const sand = warm ? 0xe8c090 : 0xd8c8a8;
+  const mid = warm ? 0xc8b8a0 : 0xb8b4b0;
+  const midDark = warm ? 0xa89880 : 0x9a9690;
+  const peak = snow ? 0xf7f4ef : 0xe4e0d8;
+  const peakBright = 0xffffff;
+
+  const matSand = rockMat(sand);
+  const matMid = rockMat(mid);
+  const matDark = rockMat(midDark);
+  const matPeak = rockMat(peak);
+  const matSnow = rockMat(peakBright, 0.82);
+
+  const w = wide ? 1.45 : 1.15;
+  const hMul = 1.5 + Math.random() * 0.9;
+
+  // Base mound (warm / sandy)
+  const base = new THREE.Mesh(new THREE.DodecahedronGeometry(scale * 0.95, 0), matSand);
+  base.scale.set(w * 1.35, 0.7, w * 1.2);
+  base.position.y = scale * 0.25;
+  base.rotation.set(Math.random() * 0.3, Math.random() * Math.PI, Math.random() * 0.2);
+  base.castShadow = true;
+  base.receiveShadow = true;
+  g.add(base);
+
+  // Main cliff body
+  const main = new THREE.Mesh(new THREE.IcosahedronGeometry(scale, 0), matMid);
+  main.scale.set(w * 1.05, hMul, w * 0.95);
+  main.position.y = scale * (0.55 + hMul * 0.25);
+  main.rotation.y = Math.random() * Math.PI;
+  main.castShadow = true;
+  g.add(main);
+
+  // Darker face / overhang
+  const face = new THREE.Mesh(new THREE.TetrahedronGeometry(scale * 0.7, 0), matDark);
+  face.scale.set(1.1, 1.4, 0.7);
+  face.position.set(scale * 0.55 * (Math.random() > 0.5 ? 1 : -1), scale * 0.7, scale * 0.15);
+  face.rotation.set(0.3, Math.random(), 0.2);
+  face.castShadow = true;
+  g.add(face);
+
+  // Side boulder
+  const side = new THREE.Mesh(new THREE.DodecahedronGeometry(scale * 0.48, 0), matMid);
+  side.scale.set(1.2, 1.5, 1.0);
+  side.position.set(-scale * 0.75, scale * 0.45, scale * 0.2);
+  side.castShadow = true;
+  g.add(side);
+
+  // Upper pale ridge
+  const ridge = new THREE.Mesh(new THREE.OctahedronGeometry(scale * 0.55, 0), matPeak);
+  ridge.scale.set(1.3, 1.8, 1.0);
+  ridge.position.y = scale * (0.9 + hMul * 0.45);
+  ridge.rotation.y = Math.random();
+  ridge.castShadow = true;
+  g.add(ridge);
+
+  // Bright white snow / chalk tip
+  if (snow) {
+    const tip = new THREE.Mesh(new THREE.OctahedronGeometry(scale * 0.35, 0), matSnow);
+    tip.scale.set(1.2, 1.6, 1.1);
+    tip.position.y = scale * (1.15 + hMul * 0.55);
+    tip.castShadow = true;
+    g.add(tip);
+
+    // Extra snow patch on ledge
+    const patch = new THREE.Mesh(new THREE.DodecahedronGeometry(scale * 0.22, 0), matSnow);
+    patch.scale.set(1.4, 0.5, 1.1);
+    patch.position.set(scale * 0.35, scale * (0.85 + hMul * 0.35), scale * 0.25);
+    g.add(patch);
+  }
+
+  // Small rubble chips at foot
+  for (let i = 0; i < 3; i++) {
+    const chip = new THREE.Mesh(
+      new THREE.TetrahedronGeometry(scale * (0.12 + Math.random() * 0.1), 0),
+      i % 2 === 0 ? matSand : matDark
+    );
+    chip.position.set(
+      (Math.random() - 0.5) * scale * 1.6,
+      scale * 0.08,
+      (Math.random() - 0.5) * scale * 1.2
+    );
+    chip.rotation.set(Math.random(), Math.random(), Math.random());
+    g.add(chip);
+  }
+
   return g;
 }
 
-function makeTorch() {
+function rockMat(color, roughness = 0.92) {
+  return new THREE.MeshStandardMaterial({
+    color,
+    roughness,
+    metalness: 0.02,
+    flatShading: true,
+  });
+}
+
+function makeCactus() {
   const g = new THREE.Group();
-  const pole = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.06, 0.08, 1.6, 8),
-    new THREE.MeshStandardMaterial({ color: 0x5a4030, roughness: 0.85 })
-  );
-  pole.position.y = 0.8;
-  g.add(pole);
-  const flame = new THREE.Mesh(
-    new THREE.ConeGeometry(0.15, 0.4, 8),
-    new THREE.MeshStandardMaterial({
-      color: 0xff6622,
-      emissive: 0xff4400,
-      emissiveIntensity: 1,
-      transparent: true,
-      opacity: 0.9,
-    })
-  );
-  flame.position.y = 1.75;
-  g.add(flame);
-  const light = new THREE.PointLight(0xff6622, 1.2, 6, 2);
-  light.position.y = 1.8;
-  g.add(light);
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x3d9a4a,
+    roughness: 0.7,
+    flatShading: true,
+  });
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 1.6, 6), mat);
+  trunk.position.y = 0.8;
+  trunk.castShadow = true;
+  g.add(trunk);
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.7, 6), mat);
+  arm.position.set(0.35, 1.1, 0);
+  arm.rotation.z = -Math.PI / 2.5;
+  g.add(arm);
+  const armTip = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.45, 6), mat);
+  armTip.position.set(0.55, 1.35, 0);
+  g.add(armTip);
   return g;
 }
 
-function makeWaterfall() {
-  const g = new THREE.Group();
-  const sheet = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.2, 5),
-    new THREE.MeshBasicMaterial({
-      color: 0x88ddff,
-      transparent: true,
-      opacity: 0.35,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-    })
-  );
-  sheet.position.y = -1;
-  g.add(sheet);
-  return g;
+function buildFenceArc(root, radius, a0, a1, posts) {
+  const wood = new THREE.MeshStandardMaterial({ color: 0xa67c52, roughness: 0.85, flatShading: true });
+  for (let i = 0; i < posts; i++) {
+    const t = i / (posts - 1);
+    const a = a0 + (a1 - a0) * t;
+    const x = Math.cos(a) * radius;
+    const z = Math.sin(a) * radius;
+    if (z > radius * 0.55) continue;
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.0, 0.12), wood);
+    post.position.set(x, 0.5, z);
+    post.castShadow = true;
+    root.add(post);
+    if (i < posts - 1) {
+      const a2 = a0 + (a1 - a0) * ((i + 1) / (posts - 1));
+      const x2 = Math.cos(a2) * radius;
+      const z2 = Math.sin(a2) * radius;
+      if (z2 > radius * 0.55) continue;
+      const dx = x2 - x;
+      const dz = z2 - z;
+      const len = Math.hypot(dx, dz);
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(len, 0.08, 0.06), wood);
+      rail.position.set((x + x2) / 2, 0.65, (z + z2) / 2);
+      rail.rotation.y = -Math.atan2(dz, dx);
+      root.add(rail);
+    }
+  }
 }
 
-function makeBanner(color) {
-  const g = new THREE.Group();
-  const pole = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.05, 0.05, 3, 6),
-    new THREE.MeshStandardMaterial({ color: 0x8b5a2b, roughness: 0.8 })
-  );
-  g.add(pole);
-  const cloth = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.2, 1.8),
-    new THREE.MeshStandardMaterial({
-      color,
-      roughness: 0.7,
-      side: THREE.DoubleSide,
-      emissive: color,
-      emissiveIntensity: 0.15,
-    })
-  );
-  cloth.position.set(0.6, -0.3, 0);
-  g.add(cloth);
-  return g;
+function makeCrackTexture() {
+  const c = document.createElement("canvas");
+  c.width = 512;
+  c.height = 512;
+  const ctx = c.getContext("2d");
+  const g = ctx.createRadialGradient(256, 256, 20, 256, 256, 280);
+  g.addColorStop(0, "#f0a84a");
+  g.addColorStop(0.5, "#e08a30");
+  g.addColorStop(1, "#c46a22");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 512, 512);
+  ctx.strokeStyle = "rgba(120,60,20,0.35)";
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 40; i++) {
+    ctx.beginPath();
+    let x = Math.random() * 512;
+    let y = Math.random() * 512;
+    ctx.moveTo(x, y);
+    for (let j = 0; j < 5; j++) {
+      x += (Math.random() - 0.5) * 80;
+      y += (Math.random() - 0.5) * 80;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(3, 3);
+  return tex;
 }
 
-function makeStoneTexture(base) {
+function makeWoodTexture() {
   const c = document.createElement("canvas");
   c.width = 128;
   c.height = 256;
   const ctx = c.getContext("2d");
-  ctx.fillStyle = "#" + new THREE.Color(base).getHexString();
+  ctx.fillStyle = "#c4a06a";
   ctx.fillRect(0, 0, 128, 256);
-  for (let i = 0; i < 80; i++) {
-    ctx.fillStyle = Math.random() > 0.5 ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.1)";
-    ctx.fillRect(Math.random() * 128, Math.random() * 256, 8 + Math.random() * 30, 4 + Math.random() * 12);
+  for (let y = 0; y < 256; y += 6) {
+    ctx.fillStyle = Math.random() > 0.5 ? "rgba(90,50,20,0.12)" : "rgba(255,220,160,0.1)";
+    ctx.fillRect(0, y, 128, 3 + Math.random() * 3);
   }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -637,11 +511,14 @@ function addPadLabel(parent, text, x, y, z) {
   ctx.font = "bold 78px Fredoka, Nunito, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
+  ctx.strokeStyle = "rgba(0,0,0,0.25)";
+  ctx.lineWidth = 8;
+  ctx.strokeText(text, 64, 70);
   ctx.fillText(text, 64, 70);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.6, 0.6),
+    new THREE.PlaneGeometry(0.55, 0.55),
     new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })
   );
   mesh.rotation.x = -Math.PI / 2;
