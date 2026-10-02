@@ -5,15 +5,18 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "server": "node server.js",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "vite preview"
+    "start": "node server.js"
   },
   "engines": {
     "node": "20.x"
   },
   "dependencies": {
-    "three": "^0.170.0"
+    "express": "^4.21.2",
+    "three": "^0.170.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "vite": "^6.0.3"

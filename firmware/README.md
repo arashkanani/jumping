@@ -1,66 +1,82 @@
-# GAME BOX — ESP32 Foot Pads
+# GAME BOX — ESP32 Foot Pads → Cloud
 
 ## Architecture
 
 ```
-[Foot switch 1]──┐
-[Foot switch 2]──┼──► ESP32 GPIO (INPUT_PULLUP)
-[Foot switch 3]──┤         │
-[Foot switch 4]──┘         ▼
-                    SoftAP WiFi  SSID: GAMEBOX-PADS
-                         │
-                         ▼
-                  WebSocket :81
-                         │
-                         ▼
-              Browser game (Vite / Three.js)
-              src/footpads.js → press/release jump
+[Foot switches] → ESP32 (WiFi STA)
+                      │
+                      │  HTTPS POST
+                      ▼
+              https://YOUR-APP.onrender.com
+                      │
+              /api/pad  →  relay
+                      │
+                      ▼
+              browsers on /ws  →  jump!
 ```
 
-- **ESP32** reads 4 mechanical keys, debounces, broadcasts JSON over WebSocket.
-- **Phone/PC** joins ESP32 WiFi, opens the game, auto-connects to `ws://192.168.4.1:81`.
-- Keyboard `A`/`S`/`K`/`L` still works for testing without hardware.
+Put your **Render app URL** in the ESP32 sketch (`GAME_URL`).  
+No SoftAP, no local IP, no `ws://192.168.x.x`.
 
-## Pad → player map
+## Configure ESP32
 
-| Pad | GPIO (default) | Player |
-|-----|----------------|--------|
-| 0   | 32             | Cyan Bean (A) |
-| 1   | 33             | Lime Bean (S) |
-| 2   | 25             | Violet Bean (K) |
-| 3   | 26             | Pink Bean (L) |
-
-Stomp = charge jump, release = jump (same as keyboard hold/release).
-
-## Flash ESP32
-
-1. Install [Arduino IDE](https://www.arduino.cc/) + ESP32 board pack.
-2. Library Manager → install **WebSockets** by Markus Sattler.
-3. Open `firmware/esp32_footpads/esp32_footpads.ino`.
-4. Board: ESP32 Dev Module · Upload.
+1. Open `firmware/esp32_footpads/esp32_footpads.ino`
+2. Set WiFi:
+   ```cpp
+   const char *WIFI_SSID = "YOUR_WIFI_SSID";
+   const char *WIFI_PASS = "YOUR_WIFI_PASSWORD";
+   ```
+3. Set deployed game (no trailing slash):
+   ```cpp
+   const char *GAME_URL = "https://jumping.onrender.com";
+   ```
+4. Flash ESP32 Dev Module (Arduino IDE). Serial 115200 should show `WiFi OK` then `[http] POST /api/pad → 200`.
 
 ## Wiring
 
-Each switch: one side → GPIO, other side → **GND**.  
-Internal pull-ups enabled (pressed = LOW).
+| Pad | Player | GPIO |
+|-----|--------|------|
+| 0 | Cyan (A) | 32 |
+| 1 | Lime (S) | 33 |
+| 2 | Violet (K) | 25 |
+| 3 | Pink (L) | 26 |
+
+Each switch: one side → GPIO, other → **GND** (INPUT_PULLUP, pressed = LOW).
 
 ## Play
 
-1. Power ESP32 → network **GAMEBOX-PADS** / password **gamebox123**.
-2. On PC: join that WiFi (or use phone hotspot path — see note).
-3. Open game. Status should show **Pads online**.
-4. Optional custom URL: `http://localhost:5173/?pads=ws://192.168.4.1:81`
+1. Deploy the game on Render (Node service: build `npm ci && npm run build`, start `npm start`).
+2. Open `https://jumping.onrender.com` on phones/TV.
+3. Power ESP32 on the same internet (home WiFi).
+4. Stomp pads — events go to the cloud and into every open browser.
 
-### Dev note (PC on home WiFi + ESP32 SoftAP)
+## Local dev
 
-Browsers need the PC on the same network as the ESP32. Easiest:
-- Connect the **laptop to GAMEBOX-PADS**, then open the game from a built file or local server on that laptop, **or**
-- Change firmware to `WIFI_STA` and join your home router (edit SSID/pass in `.ino`), then use `?pads=ws://<esp-ip>:81`.
+```bash
+npm install
+npm run server   # terminal 1 — API + /ws on :3000
+npm run dev      # terminal 2 — Vite proxies /api and /ws
+```
 
-## Protocol
+Point `GAME_URL` at a tunnel (e.g. Cloudflare Tunnel / ngrok) to `http://localhost:3000` if testing pads against your PC, or keep using the Render URL.
 
-```json
-{"t":"hello","device":"gamebox-esp32","pads":4}
+## API
+
+```http
+POST /api/pad
+Content-Type: application/json
+
 {"t":"down","pad":0}
 {"t":"up","pad":0}
 ```
+
+```http
+POST /api/log
+{"msg":"esp32-boot"}
+```
+
+```http
+GET /api/health
+```
+
+Browsers: `wss://YOUR-APP.onrender.com/ws`

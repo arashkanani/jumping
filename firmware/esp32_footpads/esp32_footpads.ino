@@ -1,82 +1,83 @@
 /*
- * GAME BOX — 4 foot keys → ESP32 → WebSocket → browser
+ * GAME BOX — ESP32 foot pads → cloud app (Render)
  *
- * MODE: WIFI_STA (joins your home WiFi — recommended)
+ * Flow:
+ *   Foot switch → ESP32 → HTTPS POST → https://YOUR-APP.onrender.com/api/pad
+ *                                    → browsers receive events on /ws
  *
- * Library: WebSockets by Markus Sattler
+ * You do NOT configure local IP or WebSocket SoftAP.
+ * Just set GAME_URL to your deployed Render link.
+ *
+ * Libraries: none extra (WiFi + HTTPClient + WiFiClientSecure built-in)
  *
  * Wiring (pressed = LOW, internal pull-up):
- *   Pad 1 (Player A / Cyan)   → GPIO 32  → GND
- *   Pad 2 (Player S / Lime)   → GPIO 33  → GND
- *   Pad 3 (Player K / Violet) → GPIO 25  → GND
- *   Pad 4 (Player L / Pink)   → GPIO 26  → GND
- *
- * After upload, open Serial Monitor 115200 and copy the printed IP, e.g.:
- *   WS  ws://192.168.1.42:81
- * Then open the game with:
- *   http://localhost:5173/?pads=ws://192.168.1.42:81
- * Or paste that URL in the Pads box in the UI.
+ *   Pad 0 (A / Cyan)   → GPIO 32 → GND
+ *   Pad 1 (S / Lime)   → GPIO 33 → GND
+ *   Pad 2 (K / Violet) → GPIO 25 → GND
+ *   Pad 3 (L / Pink)   → GPIO 26 → GND
  */
 
 #include <WiFi.h>
-#include <WebSocketsServer.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 
-// ——— Put YOUR home WiFi here (2.4 GHz — ESP32 has no 5 GHz) ———
+// ——— 1) Home WiFi (2.4 GHz only) ———
 const char *WIFI_SSID = "YOUR_WIFI_SSID";
 const char *WIFI_PASS = "YOUR_WIFI_PASSWORD";
 
-const uint8_t WS_PORT = 81;
+// ——— 2) Deployed game URL (no trailing slash) ———
+const char *GAME_URL = "https://jumping.onrender.com";
 
 const uint8_t PAD_PINS[4] = {32, 33, 25, 26};
 const uint8_t PAD_COUNT = 4;
 const uint16_t DEBOUNCE_MS = 25;
-
-WebSocketsServer webSocket = WebSocketsServer(WS_PORT);
+const uint16_t HTTP_TIMEOUT_MS = 4000;
 
 bool lastStable[PAD_COUNT];
 bool lastRaw[PAD_COUNT];
 unsigned long lastChangeMs[PAD_COUNT];
 
-void broadcast(String msg) {
-  webSocket.broadcastTXT(msg);
+WiFiClientSecure secureClient;
+
+bool postJson(const char *path, const String &body) {
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  HTTPClient http;
+  String url = String(GAME_URL) + path;
+  http.setTimeout(HTTP_TIMEOUT_MS);
+  http.setReuse(true);
+
+  if (!http.begin(secureClient, url)) {
+    Serial.println("[http] begin failed");
+    return false;
+  }
+
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Connection", "close");
+  int code = http.POST(body);
+  String resp = http.getString();
+  http.end();
+
+  Serial.printf("[http] POST %s → %d %s\n", path, code, resp.c_str());
+  return code >= 200 && code < 300;
 }
 
 void sendPad(uint8_t pad, bool down) {
-  String msg = String("{\"t\":\"") + (down ? "down" : "up") +
-               "\",\"pad\":" + String(pad) + "}";
-  broadcast(msg);
-  Serial.println(msg);
+  String body = String("{\"t\":\"") + (down ? "down" : "up") +
+                "\",\"pad\":" + String(pad) + "}";
+  Serial.println(body);
+  postJson("/api/pad", body);
 }
 
-void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length) {
-  switch (type) {
-    case WStype_CONNECTED: {
-      IPAddress ip = webSocket.remoteIP(num);
-      Serial.printf("[WS] Client %u connected from %s\n", num, ip.toString().c_str());
-      String hello = "{\"t\":\"hello\",\"device\":\"gamebox-esp32\",\"pads\":4}";
-      webSocket.sendTXT(num, hello);
-      for (uint8_t i = 0; i < PAD_COUNT; i++) {
-        if (lastStable[i] == LOW) {
-          String msg = String("{\"t\":\"down\",\"pad\":") + String(i) + "}";
-          webSocket.sendTXT(num, msg);
-        }
-      }
-      break;
-    }
-    case WStype_DISCONNECTED:
-      Serial.printf("[WS] Client %u disconnected\n", num);
-      break;
-    case WStype_TEXT:
-      if (length > 0) Serial.printf("[WS] RX: %s\n", payload);
-      break;
-    default:
-      break;
-  }
+void sendLog(const String &msg) {
+  String body = String("{\"msg\":\"") + msg + "\"}";
+  postJson("/api/log", body);
 }
 
 bool connectWifi() {
   Serial.printf("Connecting to WiFi \"%s\" ...\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 
   unsigned long start = millis();
@@ -84,21 +85,20 @@ bool connectWifi() {
     delay(400);
     Serial.print(".");
     if (millis() - start > 25000) {
-      Serial.println("\nWiFi FAILED (timeout). Check SSID/pass and use 2.4 GHz.");
+      Serial.println("\nWiFi FAILED. Check SSID/pass (2.4 GHz).");
       return false;
     }
   }
   Serial.println();
-  Serial.printf("WiFi OK\n");
-  Serial.printf("IP  %s\n", WiFi.localIP().toString().c_str());
-  Serial.printf("WS  ws://%s:%u\n", WiFi.localIP().toString().c_str(), WS_PORT);
+  Serial.printf("WiFi OK  IP %s\n", WiFi.localIP().toString().c_str());
   return true;
 }
 
 void setup() {
   Serial.begin(115200);
   delay(300);
-  Serial.println("\n=== GAME BOX Foot Pads (ESP32 STA) ===");
+  Serial.println("\n=== GAME BOX Foot Pads → Cloud ===");
+  Serial.printf("GAME_URL  %s\n", GAME_URL);
 
   for (uint8_t i = 0; i < PAD_COUNT; i++) {
     pinMode(PAD_PINS[i], INPUT_PULLUP);
@@ -108,24 +108,25 @@ void setup() {
     lastChangeMs[i] = millis();
   }
 
+  // Render uses a public CA cert; skip verify for hobby reliability
+  secureClient.setInsecure();
+
   if (!connectWifi()) {
-    Serial.println("Stop — fix WiFi and re-upload / reset.");
+    Serial.println("Stop — fix WiFi and reset.");
     return;
   }
 
-  webSocket.begin();
-  webSocket.onEvent(onWebSocketEvent);
-  Serial.println("Ready — open game with ?pads=ws://<IP>:81");
-  Serial.println("When browser connects you MUST see: [WS] Client ... connected");
+  sendLog("esp32-boot");
+  Serial.println("Ready — open the Render game; stomp pads to jump.");
 }
 
 void loop() {
   if (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    Serial.println("WiFi lost — reconnecting…");
+    WiFi.reconnect();
+    delay(1500);
     return;
   }
-
-  webSocket.loop();
 
   unsigned long now = millis();
   for (uint8_t i = 0; i < PAD_COUNT; i++) {
@@ -138,7 +139,7 @@ void loop() {
 
     if ((now - lastChangeMs[i]) >= DEBOUNCE_MS && raw != lastStable[i]) {
       lastStable[i] = raw;
-      sendPad(i, raw == LOW);
+      sendPad(i, raw == LOW); // LOW = pressed
     }
   }
 }

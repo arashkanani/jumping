@@ -276,7 +276,7 @@ function releasePlayer(k) {
   jump(p, power);
 }
 
-// Foot pads via ESP32 WebSocket (0→A, 1→S, 2→K, 3→L)
+// Foot pads via cloud relay (ESP32 → POST /api/pad → browsers on /ws)
 const padsStatusEl = document.getElementById("pads-status");
 const padsUrlInput = document.getElementById("pads-url");
 const padsConnectBtn = document.getElementById("pads-connect-btn");
@@ -315,9 +315,7 @@ if (padsUrlInput) {
 }
 if (padsConnectBtn && padsUrlInput) {
   padsConnectBtn.addEventListener("click", () => {
-    const next = padsUrlInput.value.trim();
-    if (!next) return;
-    footPads.setUrl(next);
+    footPads.setUrl(padsUrlInput.value.trim());
   });
   padsUrlInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {

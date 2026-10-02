@@ -1,20 +1,10 @@
 /**
- * Foot pad client — connects to ESP32 WebSocket.
+ * Foot pad client — browsers connect to the GAME BOX relay (/ws).
+ * ESP32 posts pad events to the same app: POST /api/pad
  *
- * Pad map (default):
- *   0 → player "a" (Cyan)
- *   1 → player "s" (Lime)
- *   2 → player "k" (Violet)
- *   3 → player "l" (Pink)
- *
- * Override WS URL: ?pads=ws://192.168.x.x:81
- * Or localStorage / UI Connect box.
- *
- * Note: HTTPS deploys (e.g. Render) block insecure ws:// (mixed content).
- * Use keyboard online, or connect pads from a local/http game session.
+ * Default: same-origin  ws(s)://<host>/ws
+ * Override: ?pads=wss://other-host/ws  or UI / localStorage
  */
-
-const LOCAL_DEFAULT_WS = "ws://192.168.4.1:81";
 
 const PAD_TO_KEY = {
   0: "a",
@@ -23,20 +13,17 @@ const PAD_TO_KEY = {
   3: "l",
 };
 
-function isSecurePage() {
-  return typeof location !== "undefined" && location.protocol === "https:";
+function defaultRelayUrl() {
+  if (typeof location === "undefined") return "";
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${location.host}/ws`;
 }
 
-function isInsecureWs(url) {
-  return typeof url === "string" && url.trim().toLowerCase().startsWith("ws:");
-}
-
-export function createFootPadClient({ onDown, onUp, onStatus }) {
+export function createFootPadClient({ onDown, onUp, onStatus, onLog }) {
   let socket = null;
   let reconnectTimer = null;
   let intentionalClose = false;
   let url = resolveUrl();
-  let autoConnect = shouldAutoConnect(url);
 
   function resolveUrl() {
     const q = new URLSearchParams(window.location.search).get("pads");
@@ -47,14 +34,7 @@ export function createFootPadClient({ onDown, onUp, onStatus }) {
     } catch {
       /* ignore */
     }
-    // SoftAP default only on local/http — never force it on HTTPS deploys
-    return isSecurePage() ? "" : LOCAL_DEFAULT_WS;
-  }
-
-  function shouldAutoConnect(nextUrl) {
-    if (!nextUrl) return false;
-    if (isSecurePage() && isInsecureWs(nextUrl)) return false;
-    return true;
+    return defaultRelayUrl();
   }
 
   function setStatus(status, detail = "") {
@@ -80,15 +60,7 @@ export function createFootPadClient({ onDown, onUp, onStatus }) {
     }
 
     if (!url) {
-      setStatus("disconnected", "set ESP32 WS URL to connect pads");
-      return;
-    }
-
-    if (isSecurePage() && isInsecureWs(url)) {
-      setStatus(
-        "error",
-        "HTTPS pages cannot use ws:// — play with keyboard, or open the game over http on the same LAN as the ESP32"
-      );
+      setStatus("disconnected", "no relay URL");
       return;
     }
 
@@ -138,7 +110,12 @@ export function createFootPadClient({ onDown, onUp, onStatus }) {
       if (!data || typeof data.t !== "string") return;
 
       if (data.t === "hello") {
-        setStatus("connected", `ESP32 · ${data.pads ?? 4} pads`);
+        setStatus("connected", data.device || "relay");
+        return;
+      }
+
+      if (data.t === "log") {
+        onLog?.(data);
         return;
       }
 
@@ -154,11 +131,10 @@ export function createFootPadClient({ onDown, onUp, onStatus }) {
 
   function scheduleReconnect() {
     if (reconnectTimer) return;
-    if (isSecurePage() && isInsecureWs(url)) return;
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       connect();
-    }, 2500);
+    }, 2000);
   }
 
   function disconnect() {
@@ -182,31 +158,11 @@ export function createFootPadClient({ onDown, onUp, onStatus }) {
     } catch {
       /* ignore */
     }
-    url = cleaned;
-    autoConnect = shouldAutoConnect(url);
-    if (autoConnect) connect();
-    else {
-      disconnect();
-      if (cleaned && isSecurePage() && isInsecureWs(cleaned)) {
-        setStatus(
-          "error",
-          "HTTPS pages cannot use ws:// — need wss:// or a local http game"
-        );
-      } else {
-        setStatus("disconnected", cleaned ? "" : "set ESP32 WS URL to connect pads");
-      }
-    }
+    url = cleaned || defaultRelayUrl();
+    connect();
   }
 
-  if (autoConnect) connect();
-  else {
-    setStatus(
-      "disconnected",
-      isSecurePage()
-        ? "keyboard ready · pads need local/http or wss://"
-        : "set ESP32 WS URL to connect pads"
-    );
-  }
+  connect();
 
   return {
     connect,

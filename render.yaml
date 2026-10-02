@@ -1,24 +1,14 @@
-# Render Blueprint — GAME BOX (Vite static site)
-# Manual Static Site settings:
-#   Build Command:     npm ci && npm run build
-#   Publish Directory: dist
+# Render — Node web service (serves game + ESP32 relay)
+# Build: npm ci && npm run build
+# Start: npm start
 
 services:
   - type: web
-    name: game-box
-    runtime: static
+    name: jumping
+    runtime: node
     plan: free
     branch: main
     autoDeploy: true
     buildCommand: npm ci && npm run build
-    staticPublishPath: dist
-    headers:
-      - path: /assets/*
-        name: Cache-Control
-        value: public, max-age=31536000, immutable
-      - path: /index.html
-        name: Cache-Control
-        value: no-cache
-      - path: /*
-        name: X-Content-Type-Options
-        value: nosniff
+    startCommand: npm start
+    healthCheckPath: /api/health
