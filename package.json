@@ -10,7 +10,7 @@
     "start": "vite preview"
   },
   "engines": {
-    "node": ">=18"
+    "node": "20.x"
   },
   "dependencies": {
     "three": "^0.170.0"

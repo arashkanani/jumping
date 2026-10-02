@@ -1,6 +1,7 @@
 # Render Blueprint — GAME BOX (Vite static site)
-# Dashboard: New → Blueprint → connect this repo
-# Or: New → Static Site → Build: npm ci && npm run build · Publish: dist
+# Manual Static Site settings:
+#   Build Command:     npm ci && npm run build
+#   Publish Directory: dist
 
 services:
   - type: web
