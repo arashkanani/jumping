@@ -1,10 +1,14 @@
 /**
- * Foot pad client — browsers connect to the GAME BOX relay (/ws).
- * ESP32 posts pad events to the same app: POST /api/pad
+ * Foot pad client — browsers connect to the GAME BOX cloud relay (/ws).
+ * ESP32 posts to the same app: POST /api/pad  →  relay broadcasts on /ws
  *
  * Default: same-origin  ws(s)://<host>/ws
- * Override: ?pads=wss://other-host/ws  or UI / localStorage
+ * Override: ?pads=wss://…/ws
  */
+
+const STORAGE_KEY = "gamebox_relay_ws";
+/** Old key from SoftAP / local-IP era — cleared on load */
+const LEGACY_STORAGE_KEY = "gamebox_ws";
 
 const PAD_TO_KEY = {
   0: "a",
@@ -19,7 +23,35 @@ function defaultRelayUrl() {
   return `${proto}//${location.host}/ws`;
 }
 
+/** Local ESP32 SoftAP / LAN URLs cannot be used from a public Render page */
+function isObsoleteLanUrl(url) {
+  if (!url || typeof url !== "string") return false;
+  const u = url.trim().toLowerCase();
+  if (!u.startsWith("ws://") && !u.startsWith("wss://")) return false;
+  return (
+    /192\.168\.\d+\.\d+/.test(u) ||
+    /10\.\d+\.\d+\.\d+/.test(u) ||
+    /172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+/.test(u) ||
+    u.includes("192.168.4.1") ||
+    /:81(\/|$)/.test(u)
+  );
+}
+
+function clearLegacyStorage() {
+  try {
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored && isObsoleteLanUrl(stored)) {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 export function createFootPadClient({ onDown, onUp, onStatus, onLog }) {
+  clearLegacyStorage();
+
   let socket = null;
   let reconnectTimer = null;
   let intentionalClose = false;
@@ -27,10 +59,11 @@ export function createFootPadClient({ onDown, onUp, onStatus, onLog }) {
 
   function resolveUrl() {
     const q = new URLSearchParams(window.location.search).get("pads");
-    if (q) return q;
+    if (q && !isObsoleteLanUrl(q)) return q;
+
     try {
-      const stored = localStorage.getItem("gamebox_ws");
-      if (stored) return stored;
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored && !isObsoleteLanUrl(stored)) return stored;
     } catch {
       /* ignore */
     }
@@ -64,6 +97,17 @@ export function createFootPadClient({ onDown, onUp, onStatus, onLog }) {
       return;
     }
 
+    // Never try LAN SoftAP from a hosted page
+    if (isObsoleteLanUrl(url)) {
+      url = defaultRelayUrl();
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+      } catch {
+        /* ignore */
+      }
+    }
+
     setStatus("connecting", url);
 
     let ws;
@@ -78,7 +122,7 @@ export function createFootPadClient({ onDown, onUp, onStatus, onLog }) {
     socket = ws;
 
     ws.onopen = () => {
-      setStatus("connected", url);
+      setStatus("connected", "cloud relay");
       try {
         ws.send(JSON.stringify({ t: "hello", client: "gamebox-web" }));
       } catch {
@@ -110,7 +154,7 @@ export function createFootPadClient({ onDown, onUp, onStatus, onLog }) {
       if (!data || typeof data.t !== "string") return;
 
       if (data.t === "hello") {
-        setStatus("connected", data.device || "relay");
+        setStatus("connected", data.device || "cloud relay");
         return;
       }
 
@@ -151,15 +195,31 @@ export function createFootPadClient({ onDown, onUp, onStatus, onLog }) {
   }
 
   function setUrl(next) {
-    const cleaned = (next || "").trim();
+    let cleaned = (next || "").trim();
+    if (!cleaned || isObsoleteLanUrl(cleaned)) {
+      cleaned = "";
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+      } catch {
+        /* ignore */
+      }
+      url = defaultRelayUrl();
+      connect();
+      return;
+    }
     try {
-      if (cleaned) localStorage.setItem("gamebox_ws", cleaned);
-      else localStorage.removeItem("gamebox_ws");
+      localStorage.setItem(STORAGE_KEY, cleaned);
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
     } catch {
       /* ignore */
     }
-    url = cleaned || defaultRelayUrl();
+    url = cleaned;
     connect();
+  }
+
+  function resetToCloud() {
+    setUrl("");
   }
 
   connect();
@@ -168,6 +228,8 @@ export function createFootPadClient({ onDown, onUp, onStatus, onLog }) {
     connect,
     disconnect,
     setUrl,
+    resetToCloud,
     getUrl: () => url,
+    defaultUrl: defaultRelayUrl,
   };
 }

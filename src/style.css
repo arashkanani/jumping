@@ -169,6 +169,15 @@ body {
   box-shadow: 0 1px 0 #1a4fb8;
 }
 
+.pads-connect button.pads-reset {
+  background: linear-gradient(160deg, #7ad0a0, #2f9a5f);
+  box-shadow: 0 3px 0 #1a6a3a;
+}
+
+.pads-connect button.pads-reset:active {
+  box-shadow: 0 1px 0 #1a6a3a;
+}
+
 .upgrade-toast {
   position: fixed;
   top: 22%;

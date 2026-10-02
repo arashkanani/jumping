@@ -280,6 +280,7 @@ function releasePlayer(k) {
 const padsStatusEl = document.getElementById("pads-status");
 const padsUrlInput = document.getElementById("pads-url");
 const padsConnectBtn = document.getElementById("pads-connect-btn");
+const padsResetBtn = document.getElementById("pads-reset-btn");
 
 const footPads = createFootPadClient({
   onDown: (key) => pressPlayer(key),
@@ -322,6 +323,12 @@ if (padsConnectBtn && padsUrlInput) {
       e.preventDefault();
       padsConnectBtn.click();
     }
+  });
+}
+if (padsResetBtn) {
+  padsResetBtn.addEventListener("click", () => {
+    footPads.resetToCloud();
+    if (padsUrlInput) padsUrlInput.value = footPads.getUrl();
   });
 }
 
